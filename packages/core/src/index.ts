@@ -26,3 +26,4 @@ export * from './lines';
 export * from './accounts';
 export * from './ledger';
 export * from './voucher';
+export * from './rules';

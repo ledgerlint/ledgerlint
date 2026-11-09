@@ -16,7 +16,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { ACCOUNTS, balances, trialBalance, type PostedVoucher } from '@ledgerlint/core';
-import { createJournal, JOURNAL_LIMITATIONS } from '@ledgerlint/core/journal';
+import { createJournal, createDraftStore, JOURNAL_LIMITATIONS } from '@ledgerlint/core/journal';
 import type { JournalVerifyResult, JournalWarning } from '@ledgerlint/core/journal';
 import pageHtml from './page.html';
 
@@ -88,6 +88,7 @@ async function readVouchers(rootDir: string): Promise<{
 
 async function stateHandler(rootDir: string): Promise<string> {
   const { vouchers, periods, verify, warnings } = await readVouchers(rootDir);
+  const drafts = await (await createDraftStore(rootDir)).readAll();
   const names = new Map(ACCOUNTS.map((item) => [item.code, item.name]));
   const rows = [...balances(vouchers).values()]
     .filter((row) => row.debitCents !== 0 || row.creditCents !== 0)
@@ -106,6 +107,9 @@ async function stateHandler(rootDir: string): Promise<string> {
     trial: trialBalance(vouchers),
     balances: rows,
     vouchers: recent,
+    // 待确认的草稿。**未识别（E99）的也在里面**，且带空分录——
+    // 它们不是"已经处理完的"，而是"需要你判断的"，界面必须能分辨。
+    drafts,
     limitations: [...JOURNAL_LIMITATIONS, ...GLOBAL_LIMITATIONS],
   });
 }

@@ -46,6 +46,10 @@
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: ui-monospace, Consolas, monospace; }
   td.wrap { max-width: 400px; }
   .lines { color: var(--muted); font-size: 12px; }
+  .amt { font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .assumed { color: var(--warn); font-size: 11px; margin-top: 3px; }
+  .todo { color: var(--bad); font-size: 12px; }
+  tr.unknown td { background: #fffbfa; }
   .empty { color: var(--faint); padding: 22px; text-align: center; }
   code { font-family: ui-monospace, Consolas, monospace; background: #f1f2f1; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 
@@ -76,6 +80,13 @@
 
 <main>
   <div id="alert"></div>
+
+  <div id="draftsBlock" hidden>
+    <h2 id="draftsTitle">待确认</h2>
+    <table id="drafts"><thead>
+      <tr><th>日期</th><th>流水</th><th>它认为这是</th><th>拟的分录</th></tr>
+    </thead><tbody></tbody></table>
+  </div>
 
   <h2>凭证清单</h2>
   <table id="vouchers"><thead>
@@ -180,6 +191,28 @@ async function load() {
   };
   toggle.addEventListener('click', toggleDiag);
   if (new URLSearchParams(location.search).get('diag') === '1') toggleDiag();
+
+  // ── 待确认草稿：没有就不出现（同"正常不显示"原则）────────────────────
+  const drafts = (s.drafts || []).slice().sort((a, b) => (a.txn.date < b.txn.date ? 1 : -1));
+  if (drafts.length) {
+    pick('draftsBlock').hidden = false;
+    pick('draftsTitle').textContent = `待确认（${drafts.length}）`;
+    pick('drafts').querySelector('tbody').innerHTML = drafts.map((d) => {
+      const unknown = d.lines.length === 0;
+      const lines = unknown
+        ? '<span class="todo">— 需要你判断这是什么业务</span>'
+        : d.lines.map((l) => `${l.direction === 'DEBIT' ? '借' : '贷'} ${esc(l.accountName)} ${yuan(l.amountCents)}`).join('<br>');
+      const guess = esc(d.oneLiner) + (d.assumed && d.assumed.length
+        ? `<div class="assumed">我猜的：${d.assumed.map(esc).join('；')}</div>` : '');
+      return `<tr class="${unknown ? 'unknown' : ''}">
+        <td>${esc(d.txn.date)}</td>
+        <td class="wrap"><span class="amt">${d.txn.direction === 'IN' ? '+' : '−'}${yuan(d.txn.amountCents)}</span>
+          <div class="lines">${esc(d.txn.summary || '')}${d.txn.counterparty ? ' · ' + esc(d.txn.counterparty) : ''}</div></td>
+        <td class="wrap">${guess}</td>
+        <td class="lines">${lines}</td>
+      </tr>`;
+    }).join('');
+  }
 
   // ── 正文：账本本身 ────────────────────────────────────────────────
   const tb = pick('vouchers').querySelector('tbody');

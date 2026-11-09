@@ -19,8 +19,16 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { entryLine, periodOf, post } from '@ledgerlint/core';
-import { createJournal } from '@ledgerlint/core/journal';
+import {
+  CN_SMALL_RULES,
+  classifyAll,
+  entryLine,
+  periodOf,
+  post,
+  type MoneyAccountCode,
+} from '@ledgerlint/core';
+import { createDraftStore, createJournal } from '@ledgerlint/core/journal';
+import { contentHash, parseStatement, toTransactions } from '@ledgerlint/import';
 import { startServer } from '@ledgerlint/server';
 
 const DEFAULT_DIR = './mybook';
@@ -31,6 +39,7 @@ interface BookMeta {
   readonly standard: string;
   readonly taxpayerKind: string;
   readonly vatRate: number;
+  readonly shareholders?: readonly string[];
   readonly createdAt: string;
 }
 
@@ -205,6 +214,9 @@ async function main(): Promise<void> {
     options: {
       port: { type: 'string' },
       demo: { type: 'boolean', default: false },
+      import: { type: 'string' },
+      account: { type: 'string' },
+      shareholder: { type: 'string', multiple: true },
       'no-open': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -216,13 +228,17 @@ async function main(): Promise<void> {
         '用法: ledgerlint [账套目录] [选项]',
         '',
         '选项:',
-        '  --demo        账套为空时写入一份演示数据',
-        '  --port <n>    指定端口（默认 7420，被占用时自动向后试）',
-        '  --no-open     不自动打开浏览器',
-        '  -h, --help    显示本帮助',
+        '  --demo             账套为空时写入一份演示数据',
+        '  --import <file>    导入一份银行流水 CSV（工行/招行/支付宝/微信 或通用列）',
+        '  --account <code>   这笔流水所在资金账户：1001 现金 / 1002 银行 / 1012 其他货币资金',
+        '  --shareholder <名>  股东姓名，可重复；用于区分「股东借款」与「客户回款」',
+        '  --port <n>         指定端口（默认 7420，被占用时自动向后试）',
+        '  --no-open          不自动打开浏览器',
+        '  -h, --help         显示本帮助',
         '',
         '示例:',
         '  npx ledgerlint ./mybook --demo',
+        '  npx ledgerlint ./mybook --import 流水.csv --account 1002 --shareholder 张三',
       ].join('\n'),
     );
     return;
@@ -232,6 +248,28 @@ async function main(): Promise<void> {
   await ensureBook(rootDir);
 
   const seeded = values.demo === true ? await seedDemo(rootDir) : 0;
+
+  // ── 导入流水 ────────────────────────────────────────────────────────
+  let importLine: string | null = null;
+  if (values.import !== undefined) {
+    const filePath = resolve(values.import);
+    const bytes = new Uint8Array(await readFile(filePath));
+    const report = parseStatement({ bytes, filename: filePath });
+    const account = (values.account ?? '1002') as MoneyAccountCode;
+    const txns = toTransactions(report, { account, sourceHash: contentHash(bytes) });
+
+    const meta = JSON.parse(await readFile(join(rootDir, 'book.json'), 'utf8')) as BookMeta;
+    const shareholders = [...(meta.shareholders ?? []), ...(values.shareholder ?? [])];
+    const drafts = classifyAll(txns, { vatRate: meta.vatRate, shareholders }, CN_SMALL_RULES);
+    const { added, skipped } = await (await createDraftStore(rootDir)).appendAll(drafts);
+    const unmatched = drafts.filter((draft) => draft.event === 'E99').length;
+
+    importLine =
+      `导入 ${report.source.bank}：${txns.length} 笔流水 → 新增草稿 ${added}` +
+      `${skipped > 0 ? `，已存在 ${skipped}` : ''}` +
+      `${unmatched > 0 ? `，其中 ${unmatched} 笔未识别` : ''}`;
+  }
+
   const token = await loadOrCreateToken(rootDir);
   const port = values.port === undefined ? undefined : Number.parseInt(values.port, 10);
   const server = await startServer({ rootDir, token, ...(port === undefined ? {} : { port }) });
@@ -243,6 +281,7 @@ async function main(): Promise<void> {
     `地址   ${server.url}`,
     `令牌   ${token}`,
     '',
+    ...(importLine === null ? [] : [importLine]),
     seeded > 0 ? `已写入 ${seeded} 张演示凭证` : '按 Ctrl+C 停止',
   ]);
 
