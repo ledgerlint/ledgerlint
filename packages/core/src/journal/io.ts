@@ -7,13 +7,13 @@
 import * as fsp from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { isValidDate, periodOf } from '../money';
 import type { ChainBreakReason, JournalPort, JournalWarning, JournalWarningCode, PostedVoucher } from '../types';
 
 import type { LocatedVoucher, VoucherBody } from './chain';
 import { GENESIS_PREV_HASH, hashVoucher, sealVoucherLine, verifyChain } from './chain';
 
 const PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
-const DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 /** 调用方用错了。静默兜底会让「12 月的凭证挂进 11 月」从数据表面彻底消失。 */
 export type JournalErrorCode = 'BAD_PERIOD' | 'BAD_DATE' | 'PERIOD_MISMATCH';
@@ -163,12 +163,12 @@ export async function createJournal(rootDir: string): Promise<JournalHandle> {
     if (!PERIOD_PATTERN.test(period)) throw new JournalError('BAD_PERIOD', `期间必须是 YYYY-MM，收到 ${period}`);
   }
 
-  /** 期间校验：`periodId` 由 `voucherDate` 派生，派生规则只写在这一处。 */
+  /** 期间只由 `money.periodOf` 派生一处：两处派生必然有一处先被改，而期间错位从数据表面看不出来。 */
   function assertPeriodMatches(period: string, draft: VoucherBody): void {
-    if (!DATE_PATTERN.test(draft.voucherDate)) {
-      throw new JournalError('BAD_DATE', `voucherDate 必须是 YYYY-MM-DD，收到 ${draft.voucherDate}`);
+    if (!isValidDate(draft.voucherDate)) {
+      throw new JournalError('BAD_DATE', `voucherDate 必须是真实存在的 YYYY-MM-DD，收到 ${draft.voucherDate}`);
     }
-    const derived = draft.voucherDate.slice(0, 7);
+    const derived = periodOf(draft.voucherDate);
     if (derived !== period || draft.periodId !== derived) {
       const message = `append('${period}') / periodId ${draft.periodId} / voucherDate ${draft.voucherDate} 三者派生的期间不一致`;
       throw new JournalError('PERIOD_MISMATCH', message);
