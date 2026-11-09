@@ -16,7 +16,14 @@ import { GENESIS_PREV_HASH, hashVoucher, sealVoucherLine, verifyChain } from './
 const PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 /** 调用方用错了。静默兜底会让「12 月的凭证挂进 11 月」从数据表面彻底消失。 */
-export type JournalErrorCode = 'BAD_PERIOD' | 'BAD_DATE' | 'PERIOD_MISMATCH';
+export type JournalErrorCode =
+  | 'BAD_PERIOD'
+  | 'BAD_DATE'
+  | 'PERIOD_MISMATCH'
+  /** 同一 `voucherId` 落账两次（并发确认的典型形态）。 */
+  | 'DUPLICATE_ID'
+  /** 同一期间内 `voucherNo` 撞号（并发手工录入的典型形态）。 */
+  | 'DUPLICATE_VOUCHER_NO';
 
 export class JournalError extends Error {
   readonly code: JournalErrorCode;
@@ -112,6 +119,16 @@ async function syncDir(path: string): Promise<void> {
 export async function createJournal(rootDir: string): Promise<JournalHandle> {
   const journalDir = join(rootDir, 'journal');
   const shards = new Map<string, { count: number; lastHash: string }>();
+  /**
+   * 已落账的 `voucherId` 与「期间+凭证号」。两把锁都必须在**写之前**查。
+   *
+   * 为什么不是"调用方保证唯一"：并发确认时两个请求读到同一批草稿，各自算出同一个
+   * `voucherId`（`v-${txnId}`）与同一个凭证号，然后依次 append。链完全自洽——
+   * prevHash 接得上、verify 全绿——但**同一笔业务被记了两遍**，收入凭空翻倍，
+   * 而没有任何一条校验看得出来。这是本项目最不能接受的一类错：绿勾 + 错账。
+   */
+  const voucherIds = new Set<string>();
+  const voucherNos = new Set<string>();
   const warningLog: JournalWarning[] = [];
   const seenWarnings = new Set<string>();
   let tailHash = GENESIS_PREV_HASH;
@@ -268,6 +285,19 @@ export async function createJournal(rootDir: string): Promise<JournalHandle> {
     assertPeriod(period);
     assertPeriodMatches(period, draft);
     return enqueue(async () => {
+      if (voucherIds.has(draft.voucherId)) {
+        throw new JournalError(
+          'DUPLICATE_ID',
+          `凭证 ${draft.voucherId} 已经在账本里了，拒绝重复落账（同一笔业务不能记两次）。`,
+        );
+      }
+      const noKey = `${period}|${draft.voucherNo}`;
+      if (voucherNos.has(noKey)) {
+        throw new JournalError(
+          'DUPLICATE_VOUCHER_NO',
+          `期间 ${period} 的凭证号 ${draft.voucherNo} 已被占用，请重新取号后再落账。`,
+        );
+      }
       const prevHash = tailHash;
       const hash = hashVoucher({ ...draft, prevHash });
       await appendLine(period, { ...draft, prevHash, hash });
@@ -275,6 +305,8 @@ export async function createJournal(rootDir: string): Promise<JournalHandle> {
       tailHash = hash;
       totalCount += 1;
       shards.set(period, { count: (shards.get(period)?.count ?? 0) + 1, lastHash: hash });
+      voucherIds.add(draft.voucherId);
+      voucherNos.add(noKey);
       // 锚点最后写。若它失败，凭证行已在盘上、append 抛错——此时应先核对再重试，
       // 而不是盲目重发（重发会多出一张）。这条权衡写进 JOURNAL_LIMITATIONS 第 3 条。
       await writeHead(period, hash, totalCount);
@@ -332,6 +364,8 @@ export async function createJournal(rootDir: string): Promise<JournalHandle> {
         lastScannedHash = voucher.hash;
         hashes.add(voucher.hash);
         referenced.add(voucher.prevHash);
+        voucherIds.add(voucher.voucherId);
+        voucherNos.add(`${period}|${voucher.voucherNo}`);
       }
       shards.set(period, { count, lastHash });
       totalCount += count;

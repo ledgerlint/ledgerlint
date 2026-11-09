@@ -338,3 +338,49 @@ describe('期间校验', () => {
     await expect(journal.append('26-11', draft(1))).rejects.toMatchObject({ code: 'BAD_PERIOD' });
   });
 });
+
+/**
+ * 重复落账的闸门。
+ *
+ * 这一组的存在理由不是"防手滑"，而是防**并发确认**：两个请求读到同一批草稿，
+ * 各自算出同一个 `voucherId`，然后依次 append。链完全自洽（prevHash 接得上、
+ * verify 全绿），但同一笔业务被记了两遍——收入凭空翻倍，且没有任何校验看得出来。
+ * 绿勾 + 错账是本项目最不能接受的一类错，所以闸门放在 `append` 里，
+ * 而不是指望每个调用方都记得去重。
+ */
+describe('重复落账的闸门', () => {
+  it('同一 voucherId 第二次 append 被拒，账本里只有一张', async () => {
+    const journal = await createJournal(root);
+    await journal.append('2026-11', draft(1));
+    await expect(journal.append('2026-11', draft(1))).rejects.toMatchObject({ code: 'DUPLICATE_ID' });
+    expect(await collectAll(journal)).toHaveLength(1);
+    expect(await readRows()).toHaveLength(1);
+  });
+
+  it('同一期间同一凭证号、不同 voucherId 也被拒', async () => {
+    const journal = await createJournal(root);
+    await journal.append('2026-11', draft(1));
+    const clash: VoucherBody = { ...draft(2), voucherNo: '记-0001' };
+    await expect(journal.append('2026-11', clash)).rejects.toMatchObject({ code: 'DUPLICATE_VOUCHER_NO' });
+    expect(await collectAll(journal)).toHaveLength(1);
+  });
+
+  it('重启后仍认得用过的号：闸门不靠内存，靠启动扫描', async () => {
+    const first = await createJournal(root);
+    await first.append('2026-11', draft(1));
+    const reopened = await createJournal(root);
+    await expect(reopened.append('2026-11', draft(1))).rejects.toMatchObject({ code: 'DUPLICATE_ID' });
+  });
+
+  it('同一张并发落三次：只有一张进账本，链仍然完整', async () => {
+    const journal = await createJournal(root);
+    const results = await Promise.allSettled([
+      journal.append('2026-11', draft(1)),
+      journal.append('2026-11', draft(1)),
+      journal.append('2026-11', draft(1)),
+    ]);
+    expect(results.filter((item) => item.status === 'fulfilled')).toHaveLength(1);
+    expect(await collectAll(journal)).toHaveLength(1);
+    expect((await (await createJournal(root)).verify()).ok).toBe(true);
+  });
+});

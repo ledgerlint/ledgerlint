@@ -21,7 +21,7 @@ import { entryLine } from '../lines';
 import { parseYuan, periodOf } from '../money';
 import type { Cents, JournalLine, PostedVoucher } from '../types';
 import { nextVoucherNo, post } from '../voucher';
-import { createJournal } from './io';
+import { createJournal, JournalError } from './io';
 
 /** 界面上的一行。金额是**人输入的元字符串**，不是分——由这一层负责解析。 */
 export interface ManualLineInput {
@@ -87,28 +87,39 @@ export async function postManualVoucher(
   );
 
   const journal = await createJournal(rootDir);
-  const existing: Pick<PostedVoucher, 'periodId' | 'voucherNo'>[] = [];
-  for await (const voucher of journal.readAll()) {
-    existing.push({ periodId: voucher.periodId, voucherNo: voucher.voucherNo });
-  }
-
   const period = periodOf(input.voucherDate);
-  const voucherNo = nextVoucherNo(existing, period);
   const voucherId = input.voucherId ?? makeVoucherId();
 
-  // 借贷不平、科目非末级、往来缺对象、摘要为空——全部在 post() 里拦，
-  // 抛出的是中文整句，界面直接显示给用户。
-  const body = post({
-    voucherId,
-    voucherDate: input.voucherDate,
-    summary: input.summary,
-    voucherNo,
-    lines,
-    source: 'MANUAL',
-    ruleSnapshot: {},
-  });
+  // 取号发生在 `append` 的写锁之外：两个人同时点「记入账本」会算出同一个凭证号，
+  // 先到的赢，后到的撞号。撞号不是用户的错，重算一次就好——所以这里重试而不是直接失败。
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const existing: Pick<PostedVoucher, 'periodId' | 'voucherNo'>[] = [];
+    for await (const voucher of journal.readAll()) {
+      existing.push({ periodId: voucher.periodId, voucherNo: voucher.voucherNo });
+    }
+    const voucherNo = nextVoucherNo(existing, period);
 
-  const { hash } = await journal.append(period, body);
+    // 借贷不平、科目非末级、往来缺对象、摘要为空——全部在 post() 里拦，
+    // 抛出的是中文整句，界面直接显示给用户。放在 try 外面：校验错重试没有意义。
+    const body = post({
+      voucherId,
+      voucherDate: input.voucherDate,
+      summary: input.summary,
+      voucherNo,
+      lines,
+      source: 'MANUAL',
+      ruleSnapshot: {},
+    });
 
-  return { voucherId, voucherNo, periodId: period, hash };
+    try {
+      const { hash } = await journal.append(period, body);
+      return { voucherId, voucherNo, periodId: period, hash };
+    } catch (error) {
+      if (!(error instanceof JournalError) || error.code !== 'DUPLICATE_VOUCHER_NO') throw error;
+      lastError = error;
+    }
+  }
+
+  throw lastError ?? new Error('连续三次取号都撞上了，请稍后再试。');
 }
