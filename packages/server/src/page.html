@@ -127,6 +127,13 @@
   .rev { display: flex; gap: 6px; align-items: center; }
   .rev input { font-size: 12px; padding: 3px 7px; width: 200px; }
 
+  /* ── runway ─────────────────────────────────────────────────────── */
+  .runway { margin-top: 10px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .runway .big { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .runway .big.warn { color: var(--bad); }
+  .runway .label { color: var(--muted); font-size: 12px; }
+  .runway .note { color: var(--faint); font-size: 12px; flex-basis: 100%; }
+
   footer { margin-top: 34px; padding-top: 14px; border-top: 1px solid var(--line); }
   .diag-toggle {
     background: none; border: none; padding: 0; cursor: pointer;
@@ -233,6 +240,13 @@
 
   <h2>资产负债表</h2>
   <table id="sheet"><tbody></tbody></table>
+
+  <h2>现金流 <span class="sub">钱从哪来、到哪去（内部划转不算）</span></h2>
+  <table id="cash"><thead>
+    <tr><th>类别</th><th class="num">流入</th><th class="num">流出</th><th class="num">净额</th></tr>
+  </thead><tbody></tbody></table>
+
+  <div id="runwayBlock" class="card runway" hidden></div>
 
   <footer>
     <button class="diag-toggle" id="diagToggle" aria-expanded="false"></button>
@@ -869,6 +883,40 @@ async function load() {
     parts.push(`<tr><td colspan="2" class="todo" style="padding:12px">有 ${bs.unmapped.length} 个科目的余额没有归入任何报表项目：${esc(detail)}。这张表少报了这些钱，不能直接拿去用。</td></tr>`);
   }
   pick('sheet').querySelector('tbody').innerHTML = parts.join('');
+
+  // ── 现金流 ────────────────────────────────────────────────────────
+  const cf = s.cash;
+  const bucketRow = (label, bucket) => `<tr><td>${esc(label)}</td>
+    <td class="num">${yuan(bucket.inflowCents)}</td>
+    <td class="num">${yuan(bucket.outflowCents)}</td>
+    <td class="num${bucket.netCents < 0 ? ' neg' : ''}">${yuan(bucket.netCents)}</td></tr>`;
+  pick('cash').querySelector('tbody').innerHTML = [
+    bucketRow('经营活动', cf.operating),
+    bucketRow('投资活动', cf.investing),
+    bucketRow('筹资活动', cf.financing),
+    `<tr class="total"><td>现金净增加</td><td class="num"></td><td class="num"></td><td class="num">${yuan(cf.netCents)}</td></tr>`,
+  ].join('');
+
+  // 归不进任何一类的钱必须显形：它说明有笔业务的对方科目没归好，
+  // 而那笔钱正在悄悄地从现金流表里消失。
+  if (cf.unclassified.length) {
+    pick('cash').querySelector('tbody').insertAdjacentHTML('beforeend',
+      `<tr><td colspan="4" class="todo">有 ${cf.unclassified.length} 笔钱的对方科目归不进经营/投资/筹资，未计入上表：${cf.unclassified.map((x) => `${esc(x.voucherNo)} ${esc(x.summary)} ${yuan(x.netCents)}`).join('；')}</td></tr>`);
+  }
+
+  // ── runway ────────────────────────────────────────────────────────
+  const rw = s.runway;
+  const block = pick('runwayBlock');
+  block.hidden = !(s.voucherCount > 0);
+  if (!block.hidden) {
+    const net = rw.netRunwayMonths;
+    const big = net === null
+      ? '<span class="big">不烧钱</span>'
+      : `<span class="big ${net < 6 ? 'warn' : ''}">${net} 个月</span>`;
+    block.innerHTML = `${big}<span class="label">按经营现金流算（毛 runway ${rw.grossRunwayMonths === null ? '—' : rw.grossRunwayMonths + ' 个月'}）</span>
+      <span class="label">现金 ${yuan(rw.cashCents)} · 月均经营 ${yuan(rw.averageOperatingCents)} · 用了 ${rw.months} 个月</span>
+      <div class="note">${esc(rw.note)}</div>`;
+  }
 
   // ── 确认落账 ──────────────────────────────────────────────────────
   const confirmBtn = pick('confirmHigh');

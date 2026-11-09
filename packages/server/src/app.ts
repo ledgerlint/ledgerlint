@@ -17,7 +17,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
-import { ACCOUNTS, account, accountLedger, balanceSheet, balances, incomeStatement, isOpeningVoucher, leafAccounts, periodRange, trialBalance, type PostedVoucher } from '@ledgerlint/core';
+import { ACCOUNTS, account, accountLedger, balanceSheet, balances, cashFlow, incomeStatement, isOpeningVoucher, leafAccounts, periodRange, runway as runwayReport, trialBalance, type PostedVoucher } from '@ledgerlint/core';
 import {
   closePeriod,
   closedPeriods,
@@ -239,6 +239,8 @@ async function stateHandler(rootDir: string, rangeKey: RangeKey): Promise<string
     /** 本次利润表用的是哪个区间，界面要如实标出来（别写"本年"却算全部）。 */
     incomeRange: { key: rangeKey, ...bounds },
     sheet: balanceSheet(vouchers),
+    cash: cashFlow(vouchers),
+    runway: runwayReport(vouchers),
     balances: rows,
     vouchers: recent,
     // 手工录入的科目下拉。只给**末级**科目：给了父级科目，用户选了就是一次
