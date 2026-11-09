@@ -411,14 +411,31 @@ async function load() {
     });
   }
   // 两张表必须自洽：资产负债表上的「本期未结转损益」就是利润表的净利润。
-  // 变量名不叫 check 而叫 mismatch，是因为它算出来**恒应为 0**；非 0 说明有 5xxx 科目没进利润表。
+  // 先看利润表自己完不完整（能指出是哪个科目没进表），再看两表对不对得上。
   const pnlMismatch = s.sheet.unclosedPnl - s.income.netProfit;
-  if (pnlMismatch !== 0) {
+  if (!s.income.complete) {
+    issues.push({
+      level: 'bad',
+      title: '利润表不完整',
+      body: `有 ${s.income.uncovered.length} 个损益科目的余额没有进利润表，净利润会算少`,
+      items: s.income.uncovered.map((item) => `${item.code} ${item.name}：${yuan(item.amountCents)}`),
+    });
+  } else if (pnlMismatch !== 0) {
     issues.push({
       level: 'bad',
       title: '利润表与资产负债表对不上',
       body: `净利润 ${yuan(s.income.netProfit)}，账上未结转损益 ${yuan(s.sheet.unclosedPnl)}，差 ${yuan(pnlMismatch)}`,
       items: ['这属于科目表口径问题（有损益类科目没被利润表收进来），不是录入错误。'],
+    });
+  }
+  // 资产负债表少报一行时，报表看起来依然是平的（两边同比例少报，差额为零），
+  // 所以「平」和「全」必须分开判，且不完整必须在最上面说。
+  if (!s.sheet.complete) {
+    issues.push({
+      level: 'bad',
+      title: '资产负债表不完整',
+      body: `有 ${s.sheet.unmapped.length} 个科目的余额没有归入任何报表项目，这张表少报了钱`,
+      items: s.sheet.unmapped.map((item) => `${item.code} ${item.name}：${yuan(item.amountCents)}`),
     });
   }
   pick('alert').innerHTML = alertHtml(issues);
@@ -502,7 +519,6 @@ async function load() {
   const money = (c) => `<td class="num${c < 0 ? ' neg' : ''}">${yuan(c)}</td>`;
   const row = (label, c, cls) => `<tr${cls ? ` class="${cls}"` : ''}><td>${esc(label)}</td>${money(c)}</tr>`;
   const group = (title) => `<tr class="grp"><td colspan="2">${esc(title)}</td></tr>`;
-  const acct = (r) => `<tr><td><code>${esc(r.code)}</code> ${esc(r.name)}</td>${money(r.amountCents)}</tr>`;
 
   const i = s.income;
   pick('income').querySelector('tbody').innerHTML = [
@@ -521,22 +537,31 @@ async function load() {
   ].join('');
 
   const bs = s.sheet;
+  // 行是**报表项目**（「货币资金」= 1001+1002+1012），不是科目。
+  // 按科目罗列会在加回累计折旧那天把资产算多，而报表仍然"平"。
+  const project = (line) => `<tr><td>${esc(line.label)}</td>${money(line.amountCents)}</tr>`;
   const parts = [
     group('资产'),
-    ...bs.assetRows.map(acct),
-    row('资产合计', bs.assets, 'total'),
+    ...bs.assets.map(project),
+    row('资产合计', bs.totalAssets, 'total'),
     group('负债'),
-    ...bs.liabilityRows.map(acct),
-    row('负债合计', bs.liabilities, 'total'),
+    ...bs.liabilities.map(project),
+    row('负债合计', bs.totalLiabilities, 'total'),
     group('所有者权益'),
-    ...bs.equityRows.map(acct),
-    // 单列一行，不并进"利润分配"。并进去报表会看起来平了，
+    ...bs.equity.map(project),
+    // 单列一行，不并进"未分配利润"。并进去报表会看起来平了，
     // 但看不出这笔钱还没做过期末结转——模糊的平账比明确的不平更危险。
     row('本期未结转损益', bs.unclosedPnl),
-    row('所有者权益合计', bs.equity + bs.unclosedPnl, 'total'),
-    row('负债和所有者权益总计', bs.liabilities + bs.equity + bs.unclosedPnl, 'total'),
+    row('所有者权益合计', bs.totalEquity, 'total'),
+    row('负债和所有者权益总计', bs.totalLiabilities + bs.totalEquity, 'total'),
   ];
   if (!bs.balanced) parts.push(row('差额', bs.diffCents, 'total neg'));
+  if (!bs.complete) {
+    const detail = bs.unmapped
+      .map((item) => `${item.code} ${item.name} ${yuan(item.amountCents)}`)
+      .join('；');
+    parts.push(`<tr><td colspan="2" class="todo" style="padding:12px">有 ${bs.unmapped.length} 个科目的余额没有归入任何报表项目：${esc(detail)}。这张表少报了这些钱，不能直接拿去用。</td></tr>`);
+  }
   pick('sheet').querySelector('tbody').innerHTML = parts.join('');
 
   // ── 确认落账 ──────────────────────────────────────────────────────
