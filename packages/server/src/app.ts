@@ -17,8 +17,19 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
-import { ACCOUNTS, balanceSheet, balances, incomeStatement, leafAccounts, trialBalance, type PostedVoucher } from '@ledgerlint/core';
-import { confirmDrafts, createJournal, createDraftStore, JOURNAL_LIMITATIONS, postManualVoucher } from '@ledgerlint/core/journal';
+import { ACCOUNTS, balanceSheet, balances, incomeStatement, isOpeningVoucher, leafAccounts, trialBalance, type PostedVoucher } from '@ledgerlint/core';
+import {
+  closePeriod,
+  closedPeriods,
+  confirmDrafts,
+  createJournal,
+  createDraftStore,
+  JOURNAL_LIMITATIONS,
+  postManualVoucher,
+  postOpeningVoucher,
+  reopenPeriod,
+  reverseVoucher,
+} from '@ledgerlint/core/journal';
 import type { JournalVerifyResult, JournalWarning, ManualLineInput, ManualVoucherInput } from '@ledgerlint/core/journal';
 import pageHtml from './page.html';
 
@@ -64,6 +75,28 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   }
   if (size === 0) return null;
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+}
+
+/** 从请求体取一个必填字符串。缺失就报人话，不让 `undefined` 漏进内核。 */
+function fieldOf(body: unknown, key: string): string {
+  if (body === null || typeof body !== 'object') throw new Error('请求内容不是对象。');
+  const value = (body as Record<string, unknown>)[key];
+  if (typeof value !== 'string' || value.trim() === '') throw new Error(`缺少「${key}」。`);
+  return value.trim();
+}
+
+/** 写操作的统一收口：成功回 JSON，失败回 400 + 内核抛出的中文整句。 */
+async function handleWrite(res: ServerResponse, task: () => Promise<unknown>): Promise<void> {
+  try {
+    sendText(res, 200, JSON.stringify(await task()), 'application/json; charset=utf-8');
+  } catch (error) {
+    sendText(
+      res,
+      400,
+      JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+      'application/json; charset=utf-8',
+    );
+  }
 }
 
 function sameToken(a: string, b: string): boolean {
@@ -132,22 +165,25 @@ function hostAllowed(req: IncomingMessage, port: number): boolean {
 async function readVouchers(rootDir: string): Promise<{
   readonly vouchers: readonly PostedVoucher[];
   readonly periods: readonly string[];
+  readonly periodCounts: Record<string, number>;
   readonly verify: JournalVerifyResult;
   readonly warnings: readonly JournalWarning[];
 }> {
   const journal = await createJournal(rootDir);
   const vouchers: PostedVoucher[] = [];
   for await (const voucher of journal.readAll()) vouchers.push(voucher);
+  const shards = journal.index();
   return {
     vouchers,
-    periods: journal.index().map((shard) => shard.period),
+    periods: shards.map((shard) => shard.period),
+    periodCounts: Object.fromEntries(shards.map((shard) => [shard.period, shard.count])),
     verify: await journal.verify(),
     warnings: journal.warnings(),
   };
 }
 
 async function stateHandler(rootDir: string): Promise<string> {
-  const { vouchers, periods, verify, warnings } = await readVouchers(rootDir);
+  const { vouchers, periods, periodCounts, verify, warnings } = await readVouchers(rootDir);
   const drafts = await (await createDraftStore(rootDir)).readAll();
   const names = new Map(ACCOUNTS.map((item) => [item.code, item.name]));
   const rows = [...balances(vouchers).values()]
@@ -171,6 +207,15 @@ async function stateHandler(rootDir: string): Promise<string> {
   return JSON.stringify({
     rootDir,
     periods,
+    periodCounts,
+    /**
+     * 已结账的期间。界面用它决定「能不能再记」「显示结转还是反结账」。
+     * 注意它来自 `journal/periods.jsonl`（事件重放），不是内存里的标记——
+     * 重启后、换进程读同一份账本，结果都一样。
+     */
+    closedPeriods: await closedPeriods(rootDir),
+    /** 这个账本建过期初没有。没有的话，资产负债表只有本期发生额。 */
+    hasOpening: vouchers.some((voucher) => isOpeningVoucher(voucher)),
     voucherCount: vouchers.length,
     verify,
     warnings,
@@ -288,12 +333,72 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
         }
         return;
       }
+      if (url.pathname === '/api/opening') {
+        if (req.method !== 'POST') {
+          sendText(res, 405, '{"error":"method not allowed"}', 'application/json; charset=utf-8');
+          return;
+        }
+        // 解析放在 handleWrite 里面：解析失败是 400（用户填错了），不是 500。
+        await handleWrite(res, async () => {
+          // 期初复用手工凭证的行解析：两者都是"科目 + 借贷 + 金额字符串"。
+          const parsed = parseManualInput(await readJsonBody(req));
+          return postOpeningVoucher(options.rootDir, { voucherDate: parsed.voucherDate, lines: parsed.lines });
+        });
+        return;
+      }
+      if (url.pathname === '/api/closing') {
+        if (req.method !== 'POST') {
+          sendText(res, 405, '{"error":"method not allowed"}', 'application/json; charset=utf-8');
+          return;
+        }
+        await handleWrite(res, async () => closePeriod(options.rootDir, fieldOf(await readJsonBody(req), 'period')));
+        return;
+      }
+      if (url.pathname === '/api/reopen') {
+        if (req.method !== 'POST') {
+          sendText(res, 405, '{"error":"method not allowed"}', 'application/json; charset=utf-8');
+          return;
+        }
+        await handleWrite(res, async () => {
+          const body = await readJsonBody(req);
+          return reopenPeriod(options.rootDir, fieldOf(body, 'period'), fieldOf(body, 'reason'));
+        });
+        return;
+      }
+      if (url.pathname === '/api/reverse') {
+        if (req.method !== 'POST') {
+          sendText(res, 405, '{"error":"method not allowed"}', 'application/json; charset=utf-8');
+          return;
+        }
+        await handleWrite(res, async () => {
+          const body = await readJsonBody(req);
+          return reverseVoucher(options.rootDir, fieldOf(body, 'voucherId'), fieldOf(body, 'reason'));
+        });
+        return;
+      }
       if (url.pathname === '/favicon.ico') {
         res.writeHead(204).end();
         return;
       }
       sendText(res, 404, '{"error":"not found"}', 'application/json; charset=utf-8');
-    })();
+    })().catch((error: unknown) => {
+      /**
+       * 兜底：任何没被接住的异常都不能让进程退出。
+       *
+       * 这不是防御性编程的洁癖——真实发生过：`fieldOf()` 在 `try` 外面抛，
+       * 一个 `reason: \"  \"` 的请求就让整个服务进程挂掉，
+       * 用户那边看到的是"页面突然打不开"，而日志里只有一行未捕获的 Promise。
+       * 本机单用户工具更不该因为一个畸形请求而死。
+       */
+      if (!res.headersSent) {
+        sendText(
+          res,
+          500,
+          JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+          'application/json; charset=utf-8',
+        );
+      }
+    });
   });
 
   const listenOnce = (port: number): Promise<number> =>

@@ -43,6 +43,36 @@ export function nextVoucherNo(existing: readonly Pick<PostedVoucher, 'periodId' 
   return makeVoucherNo(max + 1);
 }
 
+/**
+ * 凭证种类标记，落在 `ruleSnapshot.KIND` 上。
+ *
+ * **为什么不新增 `source` 枚举值**：`source` 是六型契约里的字段（D001），
+ * 加一个值等于改契约，要五方签字；而 `ruleSnapshot` 的语义本来就是
+ * 「这张凭证是依据什么生成的」，放一个 `KIND` 在它的范围内。
+ *
+ * 期初与结转都必须能被认出来，否则报表口径会错：
+ *   - 结转凭证把 5xxx 冲平。利润表若不排除它，结转当月的收入/费用直接归零，
+ *     而报表依然平衡、依然好看——错得毫无痕迹。
+ *   - 期初凭证是账本的起点。认不出它，就不知道"这个账本开过账没有"，
+ *     也无法阻止第二次期初把余额翻倍。
+ */
+export const VOUCHER_KIND = { OPENING: 'OPENING', CLOSING: 'CLOSING' } as const;
+
+export type VoucherKind = (typeof VOUCHER_KIND)[keyof typeof VOUCHER_KIND];
+
+/** 读凭证种类。`ruleSnapshot` 缺失（老数据）返回 `undefined`，按普通凭证处理。 */
+export function kindOf(voucher: {
+  readonly ruleSnapshot?: Readonly<Record<string, string>>;
+}): string | undefined {
+  return voucher.ruleSnapshot?.['KIND'];
+}
+
+export const isOpeningVoucher = (voucher: Parameters<typeof kindOf>[0]): boolean =>
+  kindOf(voucher) === VOUCHER_KIND.OPENING;
+
+export const isClosingVoucher = (voucher: Parameters<typeof kindOf>[0]): boolean =>
+  kindOf(voucher) === VOUCHER_KIND.CLOSING;
+
 /** 落账被拒绝的原因。每个值都要能对应上「用户下一步该改什么」。 */
 export type PostErrorCode =
   /** 日期不是真实存在的 `YYYY-MM-DD`。 */

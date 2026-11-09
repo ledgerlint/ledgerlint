@@ -103,9 +103,26 @@
     text-align: right; font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums;
   }
   #mLines tr.line td:last-child { text-align: right; }
+  /* 日期与凭证号不许折行：折成两行的日期在窄窗口里第一眼像两个数 */
+  #vouchers td:nth-child(1), #vouchers td:nth-child(2) { white-space: nowrap; }
+  #drafts td:nth-child(1) { white-space: nowrap; }
   .bal { font-variant-numeric: tabular-nums; }
   .bal.bad { color: var(--warn); }
   .bal.ok { color: var(--ok); }
+
+  /* ── 期间 ───────────────────────────────────────────────────────── */
+  .periods { display: flex; flex-direction: column; gap: 2px; }
+  .period {
+    display: flex; align-items: center; gap: 12px;
+    padding: 7px 2px; border-bottom: 1px solid var(--line); font-size: 13px;
+  }
+  .period:last-child { border-bottom: none; }
+  .period .name { font-family: ui-monospace, Consolas, monospace; font-size: 13px; min-width: 68px; }
+  .period .state { color: var(--muted); font-size: 12px; }
+  .period.closed .state { color: var(--ok); }
+  .period .spacer { flex: 1; }
+  .rev { display: flex; gap: 6px; align-items: center; }
+  .rev input { font-size: 12px; padding: 3px 7px; width: 200px; }
 
   footer { margin-top: 34px; padding-top: 14px; border-top: 1px solid var(--line); }
   .diag-toggle {
@@ -159,9 +176,37 @@
     </div>
   </div>
 
+  <div id="openingBlock" hidden>
+    <h2>建账 · 期初余额 <span class="sub">开账那天的家底；借贷必须平</span></h2>
+    <div class="card">
+      <div class="frow">
+        <label>期初日期<input type="date" id="oDate"></label>
+        <label class="grow" style="justify-content:flex-end;color:var(--faint);font-size:12px">
+          左边记「有什么」，右边记「这些东西从哪来」。差额为 0 才能建账。
+        </label>
+      </div>
+      <table id="oLines"><thead>
+        <tr><th style="width:76px">借/贷</th><th>科目</th><th class="num" style="width:150px">金额（元）</th>
+          <th style="width:156px">对方</th><th style="width:36px"></th></tr>
+      </thead><tbody></tbody></table>
+      <div class="actions">
+        <button class="row" id="oAddLine">+ 加一行</button>
+        <button class="primary" id="oPost">建账</button>
+        <span class="hint bal" id="oBalance"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="periodBlock" hidden>
+    <h2>期间 <span class="sub">结转后该月锁定，要改得先反结账</span></h2>
+    <div class="card">
+      <div id="periodList" class="periods"></div>
+    </div>
+  </div>
+
   <h2>凭证清单</h2>
   <table id="vouchers"><thead>
-    <tr><th>日期</th><th>号</th><th>摘要</th><th>分录</th><th class="num">金额</th></tr>
+    <tr><th>日期</th><th>号</th><th>摘要</th><th>分录</th><th class="num">金额</th><th style="width:158px"></th></tr>
   </thead><tbody></tbody></table>
 
   <h2>科目余额</h2>
@@ -239,8 +284,9 @@ function toCents(text) {
   return Number(parts[0]) * 100 + Number((parts[1] || '').padEnd(2, '0'));
 }
 
-function manualLines() {
-  return [...pick('mLines').querySelectorAll('tr.line')].map((tr) => ({
+/** 读一个表格里的分录行。手工凭证与期初共用同一套行结构。 */
+function readLines(tbodyId) {
+  return [...pick(tbodyId).querySelectorAll('tr.line')].map((tr) => ({
     accountCode: tr.querySelector('.mAcc').value,
     direction: tr.querySelector('.mDir').value,
     amount: tr.querySelector('.mAmt').value.trim(),
@@ -248,8 +294,14 @@ function manualLines() {
   }));
 }
 
-function updateBalance() {
-  const lines = manualLines();
+/**
+ * 实时配平提示。手工凭证与期初共用同一套判断。
+ *
+ * 注意它**只用于提示与禁用按钮**：真正落账的金额由服务端 `parseYuan` 解析，
+ * 这边算错不会记错账——反过来，这边算对了也不代表能记进去。
+ */
+function checkBalance(tbodyId, hintId, buttonId, emptyHint) {
+  const lines = readLines(tbodyId);
   let debit = 0;
   let credit = 0;
   let unreadable = false;
@@ -258,8 +310,8 @@ function updateBalance() {
     if (cents === null) { unreadable = true; continue; }
     if (line.direction === 'DEBIT') debit += cents; else credit += cents;
   }
-  const el = pick('mBalance');
-  const button = pick('mPost');
+  const el = pick(hintId);
+  const button = pick(buttonId);
   const diff = debit - credit;
   const noAccount = lines.filter((line) => line.accountCode === '').length;
 
@@ -269,7 +321,7 @@ function updateBalance() {
     el.textContent = '有金额读不出来：只能填数字，最多两位小数';
   } else if (debit === 0 && credit === 0) {
     el.className = 'hint bal';
-    el.textContent = '填上金额就能记';
+    el.textContent = emptyHint;
   } else if (noAccount > 0) {
     el.className = 'hint bal bad';
     el.textContent = `还有 ${noAccount} 行没选科目`;
@@ -295,7 +347,7 @@ async function submitManual() {
       body: JSON.stringify({
         voucherDate: pick('mDate').value,
         summary: pick('mSummary').value,
-        lines: manualLines(),
+        lines: readLines('mLines'),
       }),
     });
     const out = await res.json();
@@ -324,53 +376,228 @@ async function submitManual() {
   }
 }
 
+/** 造一行分录。手工凭证与期初共用同一套行结构——**行为必须一致**，
+ * 否则「期初能填的、手工不能填」这种差异会让人以为是 bug。 */
+function addLineRow(tbodyId, options, direction) {
+  const body = pick(tbodyId).querySelector('tbody');
+  const tr = document.createElement('tr');
+  tr.className = 'line';
+  tr.innerHTML = `<td><select class="mDir"><option value="DEBIT">借</option><option value="CREDIT">贷</option></select></td>
+    <td><select class="mAcc">${options}</select></td>
+    <td class="num"><input class="mAmt" inputmode="decimal" placeholder="0.00"></td>
+    <td><input class="mCp" placeholder="往来科目才填"></td>
+    <td><button class="row mDel" title="删掉这行">×</button></td>`;
+  tr.querySelector('.mDir').value = direction;
+  body.append(tr);
+  return tr;
+}
+
+/** 行上的三件事：输入即校验、删行、加行。 */
+function bindRows(tbodyId, options, addBtnId, onChange) {
+  const body = pick(tbodyId).querySelector('tbody');
+  body.addEventListener('input', onChange);
+  body.addEventListener('change', onChange);
+  body.addEventListener('click', (ev) => {
+    const button = ev.target instanceof Element ? ev.target.closest('.mDel') : null;
+    if (button === null) return;
+    // 少于两行凑不出一借一贷，删到两行就停手。
+    if (body.querySelectorAll('tr.line').length <= 2) return;
+    const tr = button.closest('tr');
+    if (tr !== null) tr.remove();
+    onChange();
+  });
+  pick(addBtnId).onclick = () => {
+    addLineRow(tbodyId, options, 'DEBIT').querySelector('.mAmt').focus();
+    onChange();
+  };
+}
+
+const updateBalance = () => checkBalance('mLines', 'mBalance', 'mPost', '填上金额就能记');
+
 function buildManualForm(state) {
   if (formReady) return;
   formReady = true;
   const options = accountOptions(state.accounts || []);
-  const body = pick('mLines').querySelector('tbody');
-
-  const addRow = (direction) => {
-    const tr = document.createElement('tr');
-    tr.className = 'line';
-    tr.innerHTML = `<td><select class="mDir"><option value="DEBIT">借</option><option value="CREDIT">贷</option></select></td>
-      <td><select class="mAcc">${options}</select></td>
-      <td class="num"><input class="mAmt" inputmode="decimal" placeholder="0.00"></td>
-      <td><input class="mCp" placeholder="往来科目才填"></td>
-      <td><button class="row mDel" title="删掉这行">×</button></td>`;
-    tr.querySelector('.mDir').value = direction;
-    body.append(tr);
-    return tr;
-  };
-
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
   pick('mDate').value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 
-  addRow('DEBIT');
-  addRow('CREDIT');
+  addLineRow('mLines', options, 'DEBIT');
+  addLineRow('mLines', options, 'CREDIT');
+  bindRows('mLines', options, 'mAddLine', updateBalance);
 
-  body.addEventListener('input', updateBalance);
-  body.addEventListener('change', updateBalance);
-  body.addEventListener('click', (ev) => {
-    const button = ev.target instanceof Element ? ev.target.closest('.mDel') : null;
-    if (button === null) return;
-    // 少于两行就凑不出一借一贷，删到两行就停手。
-    if (body.querySelectorAll('tr.line').length <= 2) return;
-    const tr = button.closest('tr');
-    if (tr !== null) tr.remove();
-    updateBalance();
-  });
-
-  pick('mAddLine').onclick = () => {
-    addRow('DEBIT').querySelector('.mAmt').focus();
-    updateBalance();
-  };
   pick('mPost').onclick = () => void submitManual();
   pick('mSummary').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && !pick('mPost').disabled) void submitManual();
   });
   updateBalance();
+}
+
+/* ── 期初建账 ────────────────────────────────────────────────────── */
+const updateOpening = () => checkBalance('oLines', 'oBalance', 'oPost', '填上金额就能建账');
+let openingReady = false;
+
+function buildOpeningForm(state) {
+  if (openingReady) return;
+  openingReady = true;
+  // 期初只能挂资产/负债/权益：损益类是"期间内发生"的，不属于"某一天的家底"。
+  const options = accountOptions((state.accounts || []).filter((item) => item.category !== 'PNL'));
+
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  // 默认填上个月最后一天：期初通常站在"开始记账那个月的月初"。
+  const prev = new Date(now.getFullYear(), now.getMonth(), 0);
+  pick('oDate').value = `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-${pad(prev.getDate())}`;
+
+  addLineRow('oLines', options, 'DEBIT');
+  addLineRow('oLines', options, 'CREDIT');
+  bindRows('oLines', options, 'oAddLine', updateOpening);
+  pick('oPost').onclick = () => void submitOpening();
+  updateOpening();
+}
+
+async function submitOpening() {
+  const button = pick('oPost');
+  button.disabled = true;
+  button.textContent = '正在建账…';
+  try {
+    const res = await fetch('/api/opening', {
+      method: 'POST',
+      headers: { 'x-token': token, 'content-type': 'application/json' },
+      body: JSON.stringify({ voucherDate: pick('oDate').value, lines: readLines('oLines') }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error || 'HTTP ' + res.status);
+    await load();
+    pick('alert').insertAdjacentHTML(
+      'afterbegin',
+      `<div class="alert ok"><b>期初已建账</b>资产合计 ${yuan(out.totalDebitCents)} 元 · 凭证 ${esc(out.voucherNo)}</div>`,
+    );
+  } catch (e) {
+    button.disabled = false;
+    button.textContent = '建账';
+    pick('alert').insertAdjacentHTML(
+      'afterbegin',
+      `<div class="alert bad"><b>没有建账</b>${esc(e.message)}</div>`,
+    );
+  }
+}
+
+/* ── 期间：结转 / 反结账 ─────────────────────────────────────────── */
+function renderPeriods(state) {
+  const closed = new Set(state.closedPeriods || []);
+  const periods = state.periods || [];
+  pick('periodBlock').hidden = periods.length === 0;
+  if (periods.length === 0) return;
+
+  pick('periodList').innerHTML = periods.map((period) => {
+    const isClosed = closed.has(period);
+    const count = (state.periodCounts || {})[period] || 0;
+    const action = isClosed
+      ? `<button class="row" data-reopen="${esc(period)}">反结账</button>`
+      : `<button class="primary" style="font-size:12px;padding:3px 11px" data-close="${esc(period)}">结转</button>`;
+    return `<div class="period ${isClosed ? 'closed' : ''}">
+      <span class="name">${esc(period)}</span>
+      <span class="state">${isClosed ? '已结账 · 本月锁定' : '未结转'} · ${count} 张凭证</span>
+      <span class="spacer"></span>${action}</div>`;
+  }).join('');
+}
+
+/**
+ * 写操作成功后统一刷新 + 顶部提示。
+ *
+ * 提示文案由调用方给 `describe(out)`：结转有个真实的分支——**该期间没有损益发生额**，
+ * 内核返回 `closed: false`，这时候说"已结转"就是撒谎，用户会以为锁上了。
+ */
+async function writeThen(path, payload, describe) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'x-token': token, 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const out = await res.json();
+  if (!res.ok) throw new Error(out.error || 'HTTP ' + res.status);
+  await load();
+  const { title, body, level } = describe(out);
+  pick('alert').insertAdjacentHTML(
+    'afterbegin',
+    `<div class="alert ${level}"><b>${esc(title)}</b>${esc(body)}</div>`,
+  );
+  return out;
+}
+
+function fail(message) {
+  pick('alert').insertAdjacentHTML('afterbegin', `<div class="alert bad"><b>没有执行</b>${esc(message)}</div>`);
+}
+
+/** 期间列表用事件委托：内容每次 load 都重绘，逐条绑定会叠加监听。 */
+pick('periodList').onclick = (ev) => {
+  const target = ev.target instanceof Element ? ev.target : null;
+  if (target === null) return;
+
+  const closeBtn = target.closest('[data-close]');
+  if (closeBtn !== null) {
+    const period = closeBtn.getAttribute('data-close');
+    closeBtn.disabled = true;
+    closeBtn.textContent = '结转中…';
+    writeThen('/api/closing', { period }, (out) => out.closed
+      ? { title: `${period} 已结转`, body: `损益 ${yuan(out.amountCents)} 已转入本年利润，本月锁定。`, level: 'ok' }
+      : { title: `${period} 没有要结转的损益`, body: '这个期间没有损益类发生额，不需要结转（也还没有锁）。', level: 'warn' })
+      .catch((e) => { closeBtn.disabled = false; closeBtn.textContent = '结转'; fail(e.message); });
+    return;
+  }
+
+  const reopenBtn = target.closest('[data-reopen]');
+  if (reopenBtn !== null) {
+    const period = reopenBtn.getAttribute('data-reopen');
+    // 反结账必须写原因——报表会变，将来要能回答"为什么解开的"。
+    reopenBtn.outerHTML = `<span class="rev"><input data-reason="${esc(period)}" placeholder="为什么反结账（必填）"><button class="row" data-reopen-go="${esc(period)}">确认</button></span>`;
+    const input = pick('periodList').querySelector(`[data-reason="${period}"]`);
+    if (input !== null) input.focus();
+    return;
+  }
+
+  const goBtn = target.closest('[data-reopen-go]');
+  if (goBtn !== null) {
+    const period = goBtn.getAttribute('data-reopen-go');
+    const input = pick('periodList').querySelector(`[data-reason="${period}"]`);
+    const reason = input === null ? '' : input.value.trim();
+    if (reason === '') { fail('反结账必须写明原因。'); return; }
+    goBtn.disabled = true;
+    goBtn.textContent = '处理中…';
+    writeThen('/api/reopen', { period, reason }, () => ({ title: `${period} 已反结账`, body: '结转凭证已红冲，可以继续记账了（原因已留档）。', level: 'ok' }))
+      .catch((e) => { goBtn.disabled = false; goBtn.textContent = '确认'; fail(e.message); });
+  }
+};
+
+/** 凭证清单里的红冲：点一下就地变成"填原因 + 确认"，不弹窗。 */
+function bindReverse(tbody) {
+  tbody.onclick = (ev) => {
+    const target = ev.target instanceof Element ? ev.target : null;
+    if (target === null) return;
+
+    const start = target.closest('[data-reverse]');
+    if (start !== null) {
+      const id = start.getAttribute('data-reverse');
+      start.parentElement.innerHTML =
+        `<span class="rev"><input data-rev-reason="${esc(id)}" placeholder="为什么红冲（必填）"><button class="row" data-rev-go="${esc(id)}">确认</button></span>`;
+      const input = tbody.querySelector(`[data-rev-reason="${id}"]`);
+      if (input !== null) input.focus();
+      return;
+    }
+
+    const go = target.closest('[data-rev-go]');
+    if (go !== null) {
+      const id = go.getAttribute('data-rev-go');
+      const input = tbody.querySelector(`[data-rev-reason="${id}"]`);
+      const reason = input === null ? '' : input.value.trim();
+      if (reason === '') { fail('红冲必须写明原因。'); return; }
+      go.disabled = true;
+      go.textContent = '处理中…';
+      writeThen('/api/reverse', { voucherId: id, reason }, () => ({ title: '已红冲', body: '原凭证保留不动，反向凭证已入账。', level: 'ok' }))
+        .catch((e) => { go.disabled = false; go.textContent = '确认'; fail(e.message); });
+    }
+  };
 }
 
 async function load() {
@@ -380,6 +607,10 @@ async function load() {
 
   pick('bookPath').textContent = s.rootDir;
   buildManualForm(s);
+  // 期初只在"还没建过"时出现；建完之后它就从页面上消失，因为再建一次会被内核拒绝。
+  pick('openingBlock').hidden = s.hasOpening;
+  if (!s.hasOpening) buildOpeningForm(s);
+  renderPeriods(s);
 
   // ── 只在异常时说话 ────────────────────────────────────────────────
   // 正常不显示"全绿"：一个常态为真的指示灯，看过第一周就没人再看它。
@@ -410,9 +641,9 @@ async function load() {
       items: v.warnings.map((w) => `${w.code}${w.period ? ` · ${w.period}` : ''}${w.lineNo ? ` 第 ${w.lineNo} 行` : ''}：${w.message || ''}`),
     });
   }
-  // 两张表必须自洽：资产负债表上的「本期未结转损益」就是利润表的净利润。
-  // 先看利润表自己完不完整（能指出是哪个科目没进表），再看两表对不对得上。
-  const pnlMismatch = s.sheet.unclosedPnl - s.income.netProfit;
+  // 两张表必须自洽：账上的损益 = 未结转 + 已结转 = 利润表的净利润。
+  // 只比「未结转」会在结转后误报；加上「已结转」才对得上两种状态。
+  const pnlMismatch = s.sheet.unclosedPnl + s.sheet.closedPnl - s.income.netProfit;
   if (!s.income.complete) {
     issues.push({
       level: 'bad',
@@ -424,7 +655,7 @@ async function load() {
     issues.push({
       level: 'bad',
       title: '利润表与资产负债表对不上',
-      body: `净利润 ${yuan(s.income.netProfit)}，账上未结转损益 ${yuan(s.sheet.unclosedPnl)}，差 ${yuan(pnlMismatch)}`,
+      body: `未结转 ${yuan(s.sheet.unclosedPnl)} + 已结转 ${yuan(s.sheet.closedPnl)} ≠ 净利润 ${yuan(s.income.netProfit)}，差 ${yuan(pnlMismatch)}`,
       items: ['这属于科目表口径问题（有损益类科目没被利润表收进来），不是录入错误。'],
     });
   }
@@ -503,7 +734,12 @@ async function load() {
       <td class="wrap">${esc(x.summary)}</td>
       <td class="lines">${x.lines.map((l) => `${l.direction === 'DEBIT' ? '借' : '贷'} ${esc(l.accountName)} ${yuan(l.amountCents)}`).join('<br>')}</td>
       <td class="num">${yuan(x.totalDebitCents)}</td>
-    </tr>`).join('') : '<tr><td colspan="5" class="empty">还没有凭证</td></tr>';
+      <td>${x.source === 'REVERSE'
+        ? '<span class="hint">红冲凭证</span>'
+        : `<button class="row" data-reverse="${esc(x.voucherId)}">红冲</button>`}</td>
+    </tr>`).join('') : '<tr><td colspan="6" class="empty">还没有凭证</td></tr>';
+  // 每次重绘都重新绑定一次（用 onclick 覆盖，不是 addEventListener 叠加）。
+  bindReverse(tb);
 
   const bb = pick('balances').querySelector('tbody');
   bb.innerHTML = s.balances.length ? s.balances.map((b) => `<tr>

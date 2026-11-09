@@ -1,8 +1,12 @@
 /**
  * journal 的唯一写入口（T03）：append-only、月分片、启动索引、崩溃恢复。
  *
- * 全仓只有本文件的 `append` 会写 `journal/*.jsonl`（注入点只有一个实现）。布局
- * `<root>/journal/YYYY-MM.jsonl`，一行一张凭证；按月分片是因为期间天然是分片键。
+ * 全仓只有本文件的 `append` 会写 `journal/YYYY-MM.jsonl`（注入点只有一个实现）。
+ * 布局 `<root>/journal/YYYY-MM.jsonl`，一行一张凭证；按月分片是因为期间天然是分片键。
+ *
+ * **另有 `journal/periods.jsonl`（期间状态事件）由 `periods.ts` 写**，两者分工明确：
+ * 凭证是业务事实，期间状态是关于账本的事实（结账/反结账）。它不进凭证分片，
+ * 否则 `verify()` 会去给一条没有借贷的记录算哈希。
  */
 import * as fsp from 'node:fs/promises';
 import { join } from 'node:path';
@@ -12,6 +16,7 @@ import type { ChainBreakReason, JournalPort, JournalWarning, JournalWarningCode,
 
 import type { LocatedVoucher, VoucherBody } from './chain';
 import { GENESIS_PREV_HASH, hashVoucher, sealVoucherLine, verifyChain } from './chain';
+import { isPeriodClosed } from './periods';
 
 const PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -23,7 +28,9 @@ export type JournalErrorCode =
   /** 同一 `voucherId` 落账两次（并发确认的典型形态）。 */
   | 'DUPLICATE_ID'
   /** 同一期间内 `voucherNo` 撞号（并发手工录入的典型形态）。 */
-  | 'DUPLICATE_VOUCHER_NO';
+  | 'DUPLICATE_VOUCHER_NO'
+  /** 该期间已结账，不再接受新凭证。反结账后才能改。 */
+  | 'PERIOD_CLOSED';
 
 export class JournalError extends Error {
   readonly code: JournalErrorCode;
@@ -285,6 +292,14 @@ export async function createJournal(rootDir: string): Promise<JournalHandle> {
     assertPeriod(period);
     assertPeriodMatches(period, draft);
     return enqueue(async () => {
+      // 锁期检查放在写之前，且放在**存储层**：任何入口（导入、手工、红冲、CLI）
+      // 都必须过这一关。放在调用方就一定会漏一个入口，而漏掉的那次是静默的。
+      if (await isPeriodClosed(rootDir, period)) {
+        throw new JournalError(
+          'PERIOD_CLOSED',
+          `期间 ${period} 已结账，不能再记凭证。要改请先反结账（会留下原因与时间）。`,
+        );
+      }
       if (voucherIds.has(draft.voucherId)) {
         throw new JournalError(
           'DUPLICATE_ID',
@@ -317,7 +332,18 @@ export async function createJournal(rootDir: string): Promise<JournalHandle> {
   async function verify(): Promise<JournalVerifyResult> {
     const entries: LocatedVoucher[] = [];
     for await (const located of readAllLocated()) entries.push(located);
-    const tail = entries[entries.length - 1]?.voucher;
+
+    /**
+     * 链尾 = **没有任何凭证把它当作 `prevHash`** 的那一张，与 `scan()` 同一口径。
+     *
+     * 不能用「扫描顺序的最后一张」：`readAllLocated` 是按期间分片读的，
+     * 而链的顺序是**落账顺序**。一旦补录早期期间（反结账后补记、红冲上月），
+     * 最后追加的凭证会落在更早的分片里，按文件顺序取就会取错，
+     * 表现为「锚点 count 对得上、lastHash 对不上」——看起来像末尾被删，其实账没问题。
+     */
+    const referencedHashes = new Set(entries.map((entry) => entry.voucher.prevHash));
+    const openEnds = entries.filter((entry) => !referencedHashes.has(entry.voucher.hash));
+    const tail = (openEnds.length === 1 ? openEnds[0] : entries[entries.length - 1])?.voucher;
     const tailId = tail?.voucherId ?? '';
 
     // 1) 链内检查（内容 / 指针 / 顺序）：唯一能定位到「具体哪张凭证」的通道，排最前。

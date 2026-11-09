@@ -16,6 +16,42 @@
 import { account } from './accounts';
 import { balances } from './ledger';
 import type { Cents, PostedVoucher } from './types';
+import { isClosingVoucher } from './voucher';
+
+/**
+ * 这张凭证是否在「搬损益」——把 5xxx 转到本年利润。
+ *
+ * 为什么利润表必须排除它：结转凭证把每个损益科目反向转平。不排除的话，
+ * **结转当月的利润表直接归零**，而报表本身依然平衡、链依然完整、
+ * 什么都看不出来。这是本期最容易写错、也最难发现的一处。
+ *
+ * 判定用两条，缺一不可：
+ *   1. `KIND: CLOSING` 标记（系统生成的结转）
+ *   2. **结构性兜底**：同时含 5xxx 与 3103 的凭证
+ *
+ * 只认标记是不够的——用户手工做「借 5001 贷 3103」时没有标记，
+ * 而那就是一张结转凭证，照样会把利润表冲平。同时含损益与本年利润的凭证，
+ * 按定义就是在搬损益，不需要它自己承认。
+ */
+export function sweepsPnl(voucher: Pick<PostedVoucher, 'lines' | 'ruleSnapshot'>): boolean {
+  if (isClosingVoucher(voucher)) return true;
+  const touchesPnl = voucher.lines.some((line) => line.accountCode.startsWith('5'));
+  const touchesProfit = voucher.lines.some((line) => line.accountCode === '3103');
+  return touchesPnl && touchesProfit;
+}
+
+/** 已经结转到本年利润的损益净额（正=盈利）。用于两表勾稽。 */
+export function closedProfitOf(vouchers: readonly PostedVoucher[]): Cents {
+  let sum = 0;
+  for (const voucher of vouchers) {
+    if (!sweepsPnl(voucher)) continue;
+    for (const line of voucher.lines) {
+      if (line.accountCode !== '3103') continue;
+      sum += line.direction === 'CREDIT' ? line.amountCents : -line.amountCents;
+    }
+  }
+  return sum;
+}
 
 export interface AccountRow {
   readonly code: string;
@@ -119,6 +155,8 @@ export interface BalanceSheet {
   readonly totalEquity: Cents;
   /** 损益类科目尚未结转的净额（收入 − 费用）。为正表示盈利。 */
   readonly unclosedPnl: Cents;
+  /** 已经结转到本年利润的损益净额。`unclosedPnl + closedPnl` 应等于利润表的净利润。 */
+  readonly closedPnl: Cents;
   /** 资产 == 负债 + 权益（含未结转损益） */
   readonly balanced: boolean;
   readonly diffCents: Cents;
@@ -190,7 +228,9 @@ const zero = (value: Cents): Cents => (value === 0 ? 0 : value);
  * 营业利润的算式里根本不出现它们，所以"混进去"不是靠自觉，是写不出来。
  */
 export function incomeStatement(vouchers: readonly PostedVoucher[]): IncomeStatement {
-  return assembleIncomeStatement([...balances(vouchers).values()]);
+  // 排除结转凭证：它们把 5xxx 冲平，计进来会让当期利润归零（见 `sweepsPnl`）。
+  const real = vouchers.filter((voucher) => !sweepsPnl(voucher));
+  return assembleIncomeStatement([...balances(real).values()]);
 }
 
 /**
@@ -300,8 +340,14 @@ export const BS_CHART: BalanceChart = {
  */
 export function balanceSheet(vouchers: readonly PostedVoucher[]): BalanceSheet {
   // 必须先落成数组：`Map.values()` 是一次性迭代器，多次遍历会从第二次起读到空。
-  return assembleBalanceSheet([...balances(vouchers).values()]);
+  const base = assembleBalanceSheet([...balances(vouchers).values()]);
+  // `closedPnl` 要看凭证本身（哪张在搬损益），而 `assembleBalanceSheet` 只拿到余额表，
+  // 所以在这一层补上。分开的好处是下面那个纯函数可以用"缺一行的行定义"来测报警。
+  return { ...base, closedPnl: closedProfitOf(vouchers) };
 }
+
+/** 不含 `closedPnl` 的资产负债表：只依赖余额表，可被独立测试。 */
+export type BalanceSheetBase = Omit<BalanceSheet, 'closedPnl'>;
 
 /**
  * 资产负债表的实际计算。`chart` 可替换，唯一的现实用途是测试：
@@ -314,7 +360,7 @@ export function balanceSheet(vouchers: readonly PostedVoucher[]): BalanceSheet {
 export function assembleBalanceSheet(
   entries: readonly ReportEntry[],
   chart: BalanceChart = BS_CHART,
-): BalanceSheet {
+): BalanceSheetBase {
   const netOf = new Map(entries.map((entry) => [entry.code, entry.netDebitCents]));
   const used = new Set<string>();
 
