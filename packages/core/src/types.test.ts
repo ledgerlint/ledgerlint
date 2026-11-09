@@ -70,7 +70,6 @@ const BASIS_SAMPLES: readonly BasisRef[] = [
   { kind: 'RULE', file: 'rules/cn-small/income.yaml', line: 42 },
   { kind: 'TXN', txnId: SAMPLE_TXN.txnId, rowNo: SAMPLE_TXN.rowNo },
   { kind: 'INVOICE', invoiceNo: 'INV-2026-0001' },
-  { kind: 'CITE', text: '小企业会计准则第六十二条', url: 'https://example.gov.cn/kjzz/62' },
 ];
 
 const SAMPLE_HIT: RuleHit = {
@@ -189,10 +188,10 @@ describe('契约样本可按定义构造', () => {
     expect(namedEvents).toContain('E3');
   });
 
-  it('BasisRef 四个 kind 齐全', () => {
+  it('BasisRef 三个 kind 齐全（无 CITE：条文归规则库，不进凭证）', () => {
     const kinds = new Set(BASIS_SAMPLES.map((basis) => basis.kind));
-    expect(kinds.size).toBe(4);
-    expect([...kinds].sort()).toEqual(['CITE', 'INVOICE', 'RULE', 'TXN']);
+    expect(kinds.size).toBe(3);
+    expect([...kinds].sort()).toEqual(['INVOICE', 'RULE', 'TXN']);
   });
 
   it('RuleHit 的 assumed 可为空数组，basis 必须是数组', () => {

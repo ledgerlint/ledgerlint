@@ -190,24 +190,23 @@ export interface Question {
 }
 
 /**
- * 一条依据。**四个 kind 缺一不可**：规则行号 / 流水行号 / 发票号 / 条款引用。
+ * 一条依据。
  *
- * 为什么 `CITE`（条款引用）必须现在就有：`basis` 进哈希链，事后追加会让所有历史凭证
- * hash 失效（开发计划 §⑦ S1 明确「追加会改哈希链输入，不可事后补」）。
+ * **刻意没有「准则条款」这一种。** 判断依据的条文留在规则库里（`rules.yaml` 的 `cite`），
+ * 凭证只记「用了哪条规则、哪一版」。反查关系是可推导的：`ruleId + ruleVersion`
+ * 唯一确定一份规则文件，规则文件里写着它引用的是哪一条。把条文内联进每张凭证，
+ * 等于把同一段文本在几百张凭证里复制几百遍，而它提供的信息量为零。
+ *
+ * 更实际的理由：专业财务接手后，看科目与摘要就能判断依据；创始人不看条文号，
+ * 看的是「一句人话」。条文既救不了前者，也不是后者要的东西。
  */
 export type BasisRef =
-  /** 用了哪条规则：规则文件名 + 行号，可 diff、可 review。 */
+  /** 用了哪条规则：规则标识 + 规则版本（`ruleVersion` 由 `RuleHit` 携带，这里给文件位置便于 review）。 */
   | { kind: 'RULE'; file: string; line: number }
   /** 来自哪条流水：`txnId` 保证可追到唯一一笔，`rowNo` 保证用户能回原文件核对。 */
   | { kind: 'TXN'; txnId: string; rowNo: number }
   /** 来自哪张发票（勾稽才用得到；无发票也能出包，见 T18）。 */
-  | { kind: 'INVOICE'; invoiceNo: string }
-  /**
-   * 对外可引用的依据：`'小企业会计准则第X条'` / `'财税〔2023〕X号'`。
-   * `text` 必填（人要能直接读懂），`url` 可选（有官方链接就带上）。
-   * 为什么 text 必填：只剩一个 URL 的「依据」在盲评里等于没有依据。
-   */
-  | { kind: 'CITE'; text: string; url?: string };
+  | { kind: 'INVOICE'; invoiceNo: string };
 
 /**
  * 一次规则命中的全部留痕。C 产出，随 `PostedVoucher` 一起进哈希。

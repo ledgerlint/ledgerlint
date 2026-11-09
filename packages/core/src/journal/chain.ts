@@ -69,7 +69,6 @@ const BASIS_ORDER: Readonly<Record<BasisRef['kind'], readonly string[]>> = {
   RULE: ['kind', 'file', 'line'],
   TXN: ['kind', 'txnId', 'rowNo'],
   INVOICE: ['kind', 'invoiceNo'],
-  CITE: ['kind', 'text', 'url'],
 };
 
 /** 单字段编码器；默认 `encodeScalar`，嵌套结构按 key 覆盖。 */

@@ -8,59 +8,74 @@
   :root {
     --ink: #1a1d21;
     --muted: #6b7280;
+    --faint: #9ca3af;
     --line: #e5e7eb;
     --bg: #fbfbfa;
     --card: #ffffff;
     --ok: #0f766e;
     --warn: #b45309;
     --bad: #b91c1c;
-    --accent: #1f2937;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    font: 14px/1.65 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   }
   header {
-    padding: 18px 28px; border-bottom: 1px solid var(--line); background: var(--card);
+    padding: 16px 28px; border-bottom: 1px solid var(--line); background: var(--card);
     display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
   }
-  header h1 { margin: 0; font-size: 16px; letter-spacing: .02em; }
-  header .path { color: var(--muted); font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
-  main { padding: 24px 28px 60px; max-width: 1100px; }
-  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 22px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
-  .card .label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  .card .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .card .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
-  .card.ok .value { color: var(--ok); }
-  .card.bad .value { color: var(--bad); }
-  .card.warn .value { color: var(--warn); }
-  h2 { font-size: 13px; text-transform: none; color: var(--muted); font-weight: 600; margin: 26px 0 10px; }
-  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  header h1 { margin: 0; font-size: 15px; letter-spacing: .02em; font-weight: 600; }
+  header .path { color: var(--faint); font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+  main { padding: 22px 28px 40px; max-width: 1100px; }
+
+  /* 异常横幅：只在真的有问题时出现，且必须显眼 */
+  .alert { border-radius: 8px; padding: 12px 16px; margin-bottom: 18px; font-size: 13px; }
+  .alert.bad { background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid var(--bad); }
+  .alert.warn { background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid var(--warn); }
+  .alert b { display: block; margin-bottom: 2px; }
+  .alert.bad b { color: var(--bad); }
+  .alert.warn b { color: var(--warn); }
+  .alert ul { margin: 6px 0 0; padding-left: 18px; color: #4b5563; }
+
+  h2 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 24px 0 8px; letter-spacing: .04em; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: top; }
   th { background: #f6f7f6; color: var(--muted); font-weight: 600; font-size: 12px; }
   tr:last-child td { border-bottom: none; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: ui-monospace, Consolas, monospace; }
-  td.wrap { max-width: 420px; }
+  td.wrap { max-width: 400px; }
   .lines { color: var(--muted); font-size: 12px; }
-  .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; background: #eef2f1; color: var(--accent); }
-  .notice { border-left: 3px solid var(--warn); background: #fffbeb; padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 13px; }
-  .notice strong { color: var(--warn); }
-  .notice ul { margin: 6px 0 0; padding-left: 18px; }
-  .empty { color: var(--muted); padding: 20px; text-align: center; }
+  .empty { color: var(--faint); padding: 22px; text-align: center; }
   code { font-family: ui-monospace, Consolas, monospace; background: #f1f2f1; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
-  footer { color: var(--muted); font-size: 12px; margin-top: 30px; }
+
+  .notice { border-left: 3px solid #d1d5db; padding: 2px 0 2px 14px; color: #4b5563; font-size: 13px; }
+  .notice ul { margin: 4px 0 0; padding-left: 18px; }
+  .notice li { margin: 3px 0; }
+
+  footer { margin-top: 34px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .diag-toggle {
+    background: none; border: none; padding: 0; cursor: pointer;
+    color: var(--faint); font-size: 12px; font-family: inherit;
+  }
+  .diag-toggle:hover { color: var(--muted); text-decoration: underline; }
+  .diag-toggle.warn { color: var(--warn); }
+  .diag-toggle.bad { color: var(--bad); font-weight: 600; }
+  #diag { margin-top: 10px; display: none; }
+  #diag.open { display: block; }
+  #diag dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 12px; color: var(--muted); }
+  #diag dt { color: var(--faint); }
+  #diag dd { margin: 0; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
 <header>
   <h1>账本 lint</h1>
-  <span class="path" id="bookPath">…</span>
+  <span class="path" id="bookPath"></span>
 </header>
 
 <main>
-  <div class="row" id="cards"></div>
+  <div id="alert"></div>
 
   <h2>凭证清单</h2>
   <table id="vouchers"><thead>
@@ -73,12 +88,12 @@
   </thead><tbody></tbody></table>
 
   <h2>它查不出什么</h2>
-  <div class="notice">
-    <strong>本次机检的边界</strong>
-    <ul id="limits"></ul>
-  </div>
+  <div class="notice"><ul id="limits"></ul></div>
 
-  <footer id="foot"></footer>
+  <footer>
+    <button class="diag-toggle" id="diagToggle" aria-expanded="false"></button>
+    <div id="diag"><dl id="diagList"></dl></div>
+  </footer>
 </main>
 
 <script>
@@ -89,9 +104,20 @@ const pick = (id) => document.getElementById(id);
 const yuan = (cents) => (cents / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-function card(label, value, sub, cls) {
-  return `<div class="card ${cls || ''}"><div class="label">${esc(label)}</div>
-    <div class="value">${esc(value)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>`;
+/** 断链原因翻成人话。只说"链断了"等于没查——用户需要知道该去查什么。 */
+const REASON = {
+  HASH_MISMATCH: '某张凭证的内容与它的哈希对不上，可能被手工改过',
+  PREV_HASH_MISMATCH: '凭证之间接不上，可能中间少了一张',
+  ORDER_MISMATCH: '凭证的排列顺序与链不一致，可能有行被调换',
+  FORK: '链出现分叉：两张凭证把自己的前一张指向了同一张',
+  CANONICALIZE_FAILED: '某张凭证的字段不符合规范，无法参与校验',
+  HEAD_MISMATCH: '账本末尾与锚点对不上，可能末尾凭证被删，或恢复了旧备份',
+  UNPARSEABLE_LINE: '账本文件里有无法解析的行',
+};
+
+function alertHtml(issues) {
+  return issues.map((it) => `<div class="alert ${it.level}"><b>${esc(it.title)}</b>${esc(it.body)}
+    <ul>${it.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('');
 }
 
 async function load() {
@@ -100,15 +126,65 @@ async function load() {
   const s = await res.json();
 
   pick('bookPath').textContent = s.rootDir;
-  const v = s.verify || {};
-  const rejected = !v.ok;
-  pick('cards').innerHTML = [
-    card('凭证张数', String(s.voucherCount), s.periods.join('、') || '尚无凭证'),
-    card('链完整性', rejected ? '不通过' : '完整', rejected ? (v.reason || '') : '逐张重算哈希通过', rejected ? 'bad' : 'ok'),
-    card('试算平衡', s.trial.balanced ? '平衡' : '不平', `借 ${yuan(s.trial.debitCents)} / 贷 ${yuan(s.trial.creditCents)}`, s.trial.balanced ? 'ok' : 'bad'),
-    card('告警', String((v.warnings || []).length), '锚点 / 残片 / 坏行', (v.warnings || []).length ? 'warn' : ''),
-  ].join('');
 
+  // ── 只在异常时说话 ────────────────────────────────────────────────
+  // 正常不显示"全绿"：一个常态为真的指示灯，看过第一周就没人再看它。
+  // 而真正出问题那天，它也不会比别的东西更显眼。
+  const issues = [];
+  const v = s.verify || {};
+  if (!v.ok) {
+    issues.push({
+      level: 'bad',
+      title: '账本校验未通过' + (v.breakAt ? `（断在 ${v.breakAt}）` : ''),
+      body: REASON[v.reason] || '哈希链校验失败',
+      items: v.detail ? [v.detail] : [],
+    });
+  }
+  if (!s.trial.balanced) {
+    issues.push({
+      level: 'bad',
+      title: '试算不平',
+      body: `借方 ${yuan(s.trial.debitCents)} / 贷方 ${yuan(s.trial.creditCents)}，差 ${yuan(s.trial.diffCents)}`,
+      items: ['在找出差额来源之前，这份账不能交出去。'],
+    });
+  }
+  if ((v.warnings || []).length) {
+    issues.push({
+      level: 'warn',
+      title: `有 ${v.warnings.length} 条告警`,
+      body: '不一定是错，但需要你看一眼',
+      items: v.warnings.map((w) => `${w.code}${w.period ? ` · ${w.period}` : ''}${w.lineNo ? ` 第 ${w.lineNo} 行` : ''}：${w.message || ''}`),
+    });
+  }
+  pick('alert').innerHTML = alertHtml(issues);
+
+  // ── 页脚一行：正常时只是"账本完整"，点开才看明细 ────────────────────
+  const toggle = pick('diagToggle');
+  const worst = issues.some((i) => i.level === 'bad') ? 'bad' : issues.length ? 'warn' : '';
+  toggle.className = 'diag-toggle' + (worst ? ' ' + worst : '');
+  toggle.textContent =
+    worst === 'bad' ? '账本校验未通过 · 查看明细'
+    : worst === 'warn' ? '账本可用，但有告警 · 查看明细'
+    : `账本完整 · ${s.voucherCount} 张凭证 · 点此查看校验明细`;
+
+  const rows = [
+    ['凭证张数', String(s.voucherCount)],
+    ['期间', s.periods.join('、') || '—'],
+    ['试算', `${s.trial.balanced ? '平衡' : '不平'}（借 ${yuan(s.trial.debitCents)} / 贷 ${yuan(s.trial.creditCents)}）`],
+    ['哈希链', v.ok ? '逐张重算通过' : `未通过 · ${v.reason || '未知'}${v.breakAt ? ' @ ' + v.breakAt : ''}`],
+    ['告警', String((v.warnings || []).length)],
+  ];
+  pick('diagList').innerHTML = rows.map(([k, val]) => `<dt>${esc(k)}</dt><dd>${esc(val)}</dd>`).join('');
+
+  const toggleDiag = () => {
+    const box = pick('diag');
+    box.classList.toggle('open');
+    toggle.setAttribute('aria-expanded', String(box.classList.contains('open')));
+  };
+  toggle.addEventListener('click', toggleDiag);
+  if (new URLSearchParams(location.search).get('diag') === '1') toggleDiag();
+
+  // ── 正文：账本本身 ────────────────────────────────────────────────
   const tb = pick('vouchers').querySelector('tbody');
   tb.innerHTML = s.vouchers.length ? s.vouchers.map((x) => `<tr>
       <td>${esc(x.voucherDate)}</td>
@@ -127,11 +203,10 @@ async function load() {
     </tr>`).join('') : '<tr><td colspan="4" class="empty">还没有余额</td></tr>';
 
   pick('limits').innerHTML = (s.limitations || []).map((t) => `<li>${esc(t)}</li>`).join('');
-  pick('foot').textContent = `数据目录：${s.rootDir} · 仅本机可访问 · 关闭终端即停止`;
 }
 
 load().catch((e) => {
-  pick('cards').innerHTML = `<div class="card bad"><div class="label">加载失败</div><div class="value">无法读取账套</div><div class="sub">${esc(e.message)}</div></div>`;
+  pick('alert').innerHTML = `<div class="alert bad"><b>无法读取账套</b>${esc(e.message)}</div>`;
 });
 </script>
 </body>
