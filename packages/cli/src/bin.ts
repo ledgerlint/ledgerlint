@@ -30,6 +30,7 @@ import {
 import { createDraftStore, createJournal } from '@ledgerlint/core/journal';
 import { contentHash, parseStatement, toTransactions } from '@ledgerlint/import';
 import { startServer } from '@ledgerlint/server';
+import { exportCases, runEval } from './eval';
 
 const DEFAULT_DIR = './mybook';
 const TOKEN_DIR = join(homedir(), '.ledgerlint', 'tokens');
@@ -217,6 +218,9 @@ async function main(): Promise<void> {
       import: { type: 'string' },
       account: { type: 'string' },
       shareholder: { type: 'string', multiple: true },
+      'export-cases': { type: 'string' },
+      out: { type: 'string' },
+      eval: { type: 'string' },
       'no-open': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -232,6 +236,8 @@ async function main(): Promise<void> {
         '  --import <file>    导入一份银行流水 CSV（工行/招行/支付宝/微信 或通用列）',
         '  --account <code>   这笔流水所在资金账户：1001 现金 / 1002 银行 / 1012 其他货币资金',
         '  --shareholder <名>  股东姓名，可重复；用于区分「股东借款」与「客户回款」',
+        '  --export-cases <csv> --out <csv>  把流水导出成待标注的评测表',
+        '  --eval <csv>       按标注给当前规则打分（不启动服务）',
         '  --port <n>         指定端口（默认 7420，被占用时自动向后试）',
         '  --no-open          不自动打开浏览器',
         '  -h, --help         显示本帮助',
@@ -249,6 +255,27 @@ async function main(): Promise<void> {
 
   const seeded = values.demo === true ? await seedDemo(rootDir) : 0;
 
+  // ── 评测相关：跑完即退出，不起服务 ──────────────────────────────────
+  const bookMeta = JSON.parse(await readFile(join(rootDir, 'book.json'), 'utf8')) as BookMeta;
+
+  if (values['export-cases'] !== undefined) {
+    if (values.out === undefined) {
+      console.error('缺少 --out <输出文件>。例：--export-cases 流水.csv --out cases.csv');
+      process.exitCode = 1;
+      return;
+    }
+    await exportCases(values['export-cases'], values.out);
+    return;
+  }
+
+  if (values.eval !== undefined) {
+    process.exitCode = await runEval(values.eval, {
+      vatRate: bookMeta.vatRate,
+      shareholders: bookMeta.shareholders ?? [],
+    });
+    return;
+  }
+
   // ── 导入流水 ────────────────────────────────────────────────────────
   let importLine: string | null = null;
   if (values.import !== undefined) {
@@ -258,9 +285,8 @@ async function main(): Promise<void> {
     const account = (values.account ?? '1002') as MoneyAccountCode;
     const txns = toTransactions(report, { account, sourceHash: contentHash(bytes) });
 
-    const meta = JSON.parse(await readFile(join(rootDir, 'book.json'), 'utf8')) as BookMeta;
-    const shareholders = [...(meta.shareholders ?? []), ...(values.shareholder ?? [])];
-    const drafts = classifyAll(txns, { vatRate: meta.vatRate, shareholders }, CN_SMALL_RULES);
+    const shareholders = [...(bookMeta.shareholders ?? []), ...(values.shareholder ?? [])];
+    const drafts = classifyAll(txns, { vatRate: bookMeta.vatRate, shareholders }, CN_SMALL_RULES);
     const { added, skipped } = await (await createDraftStore(rootDir)).appendAll(drafts);
     const unmatched = drafts.filter((draft) => draft.event === 'E99').length;
 
