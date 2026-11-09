@@ -17,8 +17,21 @@ import { fileURLToPath } from 'node:url';
 /** 仓库根目录（本脚本在 <root>/scripts/ 下）。 */
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-/** 计入预算的包；import/ 与 cli/ 按 §6.2 单独设限，不进这个总数。 */
+/** 计入主预算的包。 */
 const BUDGETED_PACKAGES = ['core', 'server', 'web'];
+
+/**
+ * 单独设限的包。
+ *
+ * `cli/` 原来没有上限，2026-11-10 补上：它已经有 550 行胶水代码，而**胶水代码是最容易
+ * 悄悄膨胀的地方**——每次加个参数、加个分支都不觉得多，半年后它就变成了第二个 bin。
+ * `import/` 的上限来自开发计划 §6.2；`cli/` 是本轮补的，600 行对应「解析参数 + 引导 +
+ * 两个评测子命令」，超出说明有逻辑该往下沉到 core 或 server。
+ */
+const SEPARATE_LIMITS = [
+  { pkg: 'import', limit: 1480 },
+  { pkg: 'cli', limit: 600 },
+];
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx']);
 const EXCLUDED_DIRS = new Set(['node_modules', 'dist', 'coverage', '.git']);
@@ -112,6 +125,20 @@ console.log(`合计 core+server+web：${total} 行 / 预算 ${LINE_LIMIT} 行（
 if (total > LINE_LIMIT) {
   console.error(`✗ 代码预算超限 ${total - LINE_LIMIT} 行。`);
   console.error('  处置：按开发计划 §6.3 的裁剪顺序先删后加，不要调高上限。');
+  process.exit(1);
+}
+
+let separateFailed = false;
+for (const { pkg, limit } of SEPARATE_LIMITS) {
+  const files = collectSourceFiles(join(REPO_ROOT, 'packages', pkg));
+  const lines = files.reduce((sum, filePath) => sum + countLines(filePath), 0);
+  const ok = lines <= limit;
+  console.log(`${ok ? '✓' : '✗'} packages/${pkg}：${lines} 行 / 上限 ${limit} 行（余量 ${limit - lines} 行）`);
+  if (!ok) separateFailed = true;
+}
+
+if (separateFailed) {
+  console.error('✗ 有包超出单独上限。先删后加，或把逻辑下沉到 core/server。');
   process.exit(1);
 }
 
