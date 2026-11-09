@@ -10,14 +10,16 @@
  * 3. **token 必填**：本机其他进程（包括浏览器里的任意网页发的请求）不该默认有权读账。
  *    首次打开靠 URL 里的 `?token=`，API 靠 `x-token` 头。
  *
- * 这里只做"读"。所有写入仍然只能走 `JournalPort.append`，不经 HTTP——
- * 在还没做确认页（T34）之前，先不开写接口：**开一个不完整的写入口比不开更危险**。
+ * 写入口只有两个，且都**不直接写文件**：`/api/confirm`（草稿 → 凭证）与
+ * `/api/voucher`（手工录入）。两者都落到 `JournalPort.append`，也就是说
+ * 「写账本」这件事在全仓仍然只有一条路径——校验、编号、哈希、锚点都在那条路上。
+ * 这样界面再怎么改，也不可能绕开链去写一行账。
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
-import { ACCOUNTS, balances, trialBalance, type PostedVoucher } from '@ledgerlint/core';
-import { createJournal, createDraftStore, JOURNAL_LIMITATIONS } from '@ledgerlint/core/journal';
-import type { JournalVerifyResult, JournalWarning } from '@ledgerlint/core/journal';
+import { ACCOUNTS, balanceSheet, balances, incomeStatement, leafAccounts, trialBalance, type PostedVoucher } from '@ledgerlint/core';
+import { confirmDrafts, createJournal, createDraftStore, JOURNAL_LIMITATIONS, postManualVoucher } from '@ledgerlint/core/journal';
+import type { JournalVerifyResult, JournalWarning, ManualLineInput, ManualVoucherInput } from '@ledgerlint/core/journal';
 import pageHtml from './page.html';
 
 export interface ServerOptions {
@@ -48,12 +50,70 @@ const GLOBAL_LIMITATIONS: readonly string[] = [
   '不校验发票真伪、不直连税局、不生成申报表：结论不能作为申报依据。',
 ];
 
+/** 请求体上限。确认接口只收一组 id，1MB 已经宽得离谱了——设上限是为了不给自己留个吞内存的口子。 */
+const MAX_BODY_BYTES = 1024 * 1024;
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    size += buf.length;
+    if (size > MAX_BODY_BYTES) throw new Error('请求体超过 1MB');
+    chunks.push(buf);
+  }
+  if (size === 0) return null;
+  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+}
+
 function sameToken(a: string, b: string): boolean {
   const left = Buffer.from(a, 'utf8');
   const right = Buffer.from(b, 'utf8');
   // 长度不等时 timingSafeEqual 会抛，先比长度；长度本身不是秘密。
   if (left.length !== right.length) return false;
   return timingSafeEqual(left, right);
+}
+
+/**
+ * 手工录入的请求体 → 内核入参。
+ *
+ * 字段逐个判类型，不信任何一个：这是**唯一**从 HTTP 进入写路径的入口，
+ * 一个 `undefined` 漏进去就会变成 `NaN` 金额，而 NaN 恰好能通过某些比较。
+ * 金额保持字符串形态往下传——解析成"分"只允许发生在 `parseYuan` 一处。
+ */
+function parseManualInput(payload: unknown): ManualVoucherInput {
+  if (payload === null || typeof payload !== 'object') throw new Error('请求内容不是一张凭证。');
+  const body = payload as Record<string, unknown>;
+  const rawLines = body['lines'];
+  if (!Array.isArray(rawLines)) throw new Error('没有分录：一借一贷至少要两行。');
+
+  const lines: ManualLineInput[] = rawLines.map((raw, index) => {
+    if (raw === null || typeof raw !== 'object') throw new Error(`第 ${index + 1} 行分录格式不对。`);
+    const line = raw as Record<string, unknown>;
+    const accountCode = line['accountCode'];
+    const direction = line['direction'];
+    const amount = line['amount'];
+    if (typeof accountCode !== 'string' || accountCode === '') throw new Error(`第 ${index + 1} 行没选科目。`);
+    if (direction !== 'DEBIT' && direction !== 'CREDIT') throw new Error(`第 ${index + 1} 行没选借或贷。`);
+    if (typeof amount !== 'string') throw new Error(`第 ${index + 1} 行金额格式不对。`);
+    const rawCounterparty = line['counterparty'];
+    const counterparty =
+      typeof rawCounterparty === 'string' && rawCounterparty.trim() !== '' ? rawCounterparty.trim() : undefined;
+    return {
+      accountCode,
+      direction,
+      amount,
+      ...(counterparty === undefined ? {} : { counterparty }),
+    };
+  });
+
+  const voucherDate = body['voucherDate'];
+  const summary = body['summary'];
+  return {
+    voucherDate: typeof voucherDate === 'string' ? voucherDate : '',
+    summary: typeof summary === 'string' ? summary : '',
+    lines,
+  };
 }
 
 function tokenOf(req: IncomingMessage, url: URL): string {
@@ -96,7 +156,17 @@ async function stateHandler(rootDir: string): Promise<string> {
     .map((row) => ({ ...row, name: names.get(row.code) ?? row.code }));
 
   // 只回最近 200 张：页面上没人会滚一万行，而全量序列化会让首屏变慢。
-  const recent = vouchers.slice(-200).reverse();
+  // **显示顺序按日期倒序，不按落账顺序倒序**：确认是攒几天再一起点的，
+  // 落账顺序与业务日期本来就不一致，照落账顺序排会让 11-04 排在 11-20 前面。
+  const recent = [...vouchers]
+    .sort((a, b) =>
+      a.voucherDate === b.voucherDate
+        ? b.voucherNo.localeCompare(a.voucherNo)
+        : a.voucherDate < b.voucherDate
+          ? 1
+          : -1,
+    )
+    .slice(0, 200);
 
   return JSON.stringify({
     rootDir,
@@ -105,8 +175,18 @@ async function stateHandler(rootDir: string): Promise<string> {
     verify,
     warnings,
     trial: trialBalance(vouchers),
+    income: incomeStatement(vouchers),
+    sheet: balanceSheet(vouchers),
     balances: rows,
     vouchers: recent,
+    // 手工录入的科目下拉。只给**末级**科目：给了父级科目，用户选了就是一次
+    // "落账被拒"，而他并不知道父级科目不该挂账。
+    accounts: leafAccounts().map((item) => ({
+      code: item.code,
+      name: item.name,
+      category: item.category,
+      ...(item.auxRequired === undefined ? {} : { auxRequired: item.auxRequired }),
+    })),
     // 待确认的草稿。**未识别（E99）的也在里面**，且带空分录——
     // 它们不是"已经处理完的"，而是"需要你判断的"，界面必须能分辨。
     drafts,
@@ -162,6 +242,50 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
       }
       if (url.pathname === '/api/state') {
         sendText(res, 200, await stateHandler(options.rootDir), 'application/json; charset=utf-8');
+        return;
+      }
+      if (url.pathname === '/api/confirm') {
+        if (req.method !== 'POST') {
+          sendText(res, 405, '{"error":"method not allowed"}', 'application/json; charset=utf-8');
+          return;
+        }
+        try {
+          const payload = await readJsonBody(req);
+          const ids =
+            payload !== null && typeof payload === 'object' && Array.isArray((payload as { ids?: unknown }).ids)
+              ? ((payload as { ids: unknown[] }).ids.filter((id): id is string => typeof id === 'string'))
+              : undefined;
+          const result = await confirmDrafts(options.rootDir, ids);
+          sendText(res, 200, JSON.stringify(result), 'application/json; charset=utf-8');
+        } catch (error) {
+          // 写失败必须原样回给界面：用户要知道是哪一张、为什么，而不是"保存失败"。
+          sendText(
+            res,
+            400,
+            JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+            'application/json; charset=utf-8',
+          );
+        }
+        return;
+      }
+      if (url.pathname === '/api/voucher') {
+        if (req.method !== 'POST') {
+          sendText(res, 405, '{"error":"method not allowed"}', 'application/json; charset=utf-8');
+          return;
+        }
+        try {
+          const input = parseManualInput(await readJsonBody(req));
+          const result = await postManualVoucher(options.rootDir, input);
+          sendText(res, 200, JSON.stringify(result), 'application/json; charset=utf-8');
+        } catch (error) {
+          // 校验失败的文案是中文整句（"借贷不平：…差额 200.00 元"），直接给界面显示。
+          sendText(
+            res,
+            400,
+            JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+            'application/json; charset=utf-8',
+          );
+        }
         return;
       }
       if (url.pathname === '/favicon.ico') {

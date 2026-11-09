@@ -36,6 +36,29 @@ export function toYuan(cents: Cents): string {
 }
 
 /**
+ * 人输入的「元」→ 整数分（手工记账的文本框、CLI 参数都走这里）。
+ *
+ * 为什么不用 `fromYuan(Number(text))`：`Number('0.1') * 100` 是 10.000000000000002，
+ * 靠 `roundCents` 能在大多数情况下救回来，但那是**把一个输入解析问题交给浮点容差兜**。
+ * 金额是从字符串里逐位抄下来的，就应当在字符串上算完：整数部分 × 100 + 补足两位的小数部分。
+ *
+ * 允许的写法：`1200`、`1200.5`、`1200.50`、`1,200.50`（千分位）、`¥1200`、`￥1,200.5`。
+ * 不允许：三位以上小数（1.005 是记不进分的，让人改，而不是替他四舍五入），
+ * 科学计数法、空串、中文数字。负数照收——分录金额不许为负由 `post()` 管，
+ * 这里不越权，否则「Excel 粘进来的 -500」会得到一句和金额格式无关的错。
+ */
+export function parseYuan(text: string): Cents {
+  const cleaned = text.trim().replace(/[,，\s]/g, '').replace(/^[¥￥]/, '');
+  const matched = /^(-)?(\d+)(?:\.(\d{1,2}))?$/.exec(cleaned);
+  if (matched === null) {
+    throw new Error(`金额「${text.trim()}」读不出来：只能是数字，最多两位小数（例如 1200 或 1200.50）。`);
+  }
+  const cents = Number(matched[2]) * 100 + Number((matched[3] ?? '').padEnd(2, '0'));
+  if (!Number.isSafeInteger(cents)) throw new Error(`金额「${text.trim()}」太大，超出可记录范围。`);
+  return matched[1] === '-' ? -cents : cents;
+}
+
+/**
  * 是不是「整数分」。允许 0 与负数：余额、净额、差额都会是负的。
  * `Number.isSafeInteger` 一并拒掉小数、NaN、Infinity 与超出 2^53 的值。
  */

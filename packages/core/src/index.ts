@@ -25,5 +25,6 @@ export * from './money';
 export * from './lines';
 export * from './accounts';
 export * from './ledger';
+export * from './reports';
 export * from './voucher';
 export * from './rules';

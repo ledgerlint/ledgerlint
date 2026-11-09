@@ -19,6 +19,7 @@ import {
   isCents,
   isValidAmount,
   isValidDate,
+  parseYuan,
   periodOf,
   periodRange,
   quarterRange,
@@ -140,6 +141,33 @@ function collectSources(dir: string): string[] {
   }
   return found;
 }
+
+describe('人输入的元 → 整数分', () => {
+  it('常规写法与千分位、货币符号都能读', () => {
+    expect(parseYuan('1200')).toBe(120000);
+    expect(parseYuan('1200.5')).toBe(120050);
+    expect(parseYuan('1200.50')).toBe(120050);
+    expect(parseYuan('1,200.50')).toBe(120050);
+    expect(parseYuan('¥1200')).toBe(120000);
+    expect(parseYuan(' ￥ 1，200.05 ')).toBe(120005);
+    expect(parseYuan('0.01')).toBe(1);
+  });
+
+  it('在字符串上算，不靠浮点', () => {
+    // 0.1 * 100 === 10.000000000000002；0.07 * 100 === 7.000000000000001
+    expect(parseYuan('0.1')).toBe(10);
+    expect(parseYuan('0.07')).toBe(7);
+    expect(parseYuan('19.99')).toBe(1999);
+    expect(parseYuan('99999999999.99')).toBe(9999999999999);
+  });
+
+  it('三位小数、科学计数法、空串一律报错，不替用户四舍五入', () => {
+    expect(() => parseYuan('1.005')).toThrow(/两位小数/);
+    expect(() => parseYuan('1e3')).toThrow(/读不出来/);
+    expect(() => parseYuan('')).toThrow(/读不出来/);
+    expect(() => parseYuan('一千二')).toThrow(/读不出来/);
+  });
+});
 
 describe('单一实现（T30 的判定基准）', () => {
   it('全仓只有 money.ts 定义了 splitInclusive，其余地方只能 import', () => {

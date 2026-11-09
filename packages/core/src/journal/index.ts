@@ -6,3 +6,5 @@
 export * from './chain';
 export * from './io';
 export * from './drafts';
+export * from './confirm';
+export * from './manual';

@@ -36,6 +36,8 @@
   .alert b { display: block; margin-bottom: 2px; }
   .alert.bad b { color: var(--bad); }
   .alert.warn b { color: var(--warn); }
+  .alert.ok { background: #f0fdfa; border: 1px solid #99f6e4; border-left: 4px solid var(--ok); }
+  .alert.ok b { color: var(--ok); }
   .alert ul { margin: 6px 0 0; padding-left: 18px; color: #4b5563; }
 
   h2 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 24px 0 8px; letter-spacing: .04em; }
@@ -50,12 +52,60 @@
   .assumed { color: var(--warn); font-size: 11px; margin-top: 3px; }
   .todo { color: var(--bad); font-size: 12px; }
   tr.unknown td { background: #fffbfa; }
+
+  .actions { margin-top: 10px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  button.primary {
+    font: inherit; padding: 5px 13px; border-radius: 6px;
+    border: 1px solid #1f2937; background: #1f2937; color: #fff; cursor: pointer;
+  }
+  button.primary:disabled { opacity: .45; cursor: default; }
+  button.primary:hover:not(:disabled) { background: #111827; }
+  button.row {
+    font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 6px;
+    border: 1px solid var(--line); background: #fff; cursor: pointer; color: var(--ink);
+  }
+  button.row:hover { border-color: #9ca3af; }
+  .hint { color: var(--faint); font-size: 12px; }
+  h2 .sub { color: var(--faint); font-weight: 400; font-size: 11px; margin-left: 6px; }
+  tr.total td { font-weight: 600; }
+  tr.total td:first-child { border-top: 1px solid var(--line); }
+  tr.total td:last-child { border-top: 1px solid var(--line); }
+  tr.head td:first-child { padding-left: 12px; }
+  tr.grp td {
+    padding: 16px 12px 5px; background: transparent; border-bottom: none;
+    color: var(--faint); font-size: 11px; letter-spacing: .06em;
+  }
+  tr.grp:first-child td { padding-top: 6px; }
+  .neg { color: var(--bad); }
   .empty { color: var(--faint); padding: 22px; text-align: center; }
   code { font-family: ui-monospace, Consolas, monospace; background: #f1f2f1; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 
   .notice { border-left: 3px solid #d1d5db; padding: 2px 0 2px 14px; color: #4b5563; font-size: 13px; }
   .notice ul { margin: 4px 0 0; padding-left: 18px; }
   .notice li { margin: 3px 0; }
+
+  /* ── 手工记账表单 ───────────────────────────────────────────────── */
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 14px 10px; }
+  .frow { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+  .frow label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .frow label.grow { flex: 1; min-width: 260px; }
+  input[type="text"], input[type="date"], select {
+    font: inherit; font-size: 13px; padding: 5px 8px; border: 1px solid var(--line);
+    border-radius: 6px; background: #fff; color: var(--ink); width: 100%;
+  }
+  input:focus, select:focus { outline: 2px solid #e0e7ff; outline-offset: -1px; border-color: #a5b4fc; }
+  input::placeholder { color: #c4c8ce; }
+  #mLines { border: none; background: transparent; }
+  #mLines th { background: transparent; padding: 4px 8px 8px; }
+  #mLines td { padding: 5px 8px; border-bottom: none; }
+  #mLines input, #mLines select { padding: 4px 7px; }
+  #mLines td.num input, #mLines input.mAmt {
+    text-align: right; font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums;
+  }
+  #mLines tr.line td:last-child { text-align: right; }
+  .bal { font-variant-numeric: tabular-nums; }
+  .bal.bad { color: var(--warn); }
+  .bal.ok { color: var(--ok); }
 
   footer { margin-top: 34px; padding-top: 14px; border-top: 1px solid var(--line); }
   .diag-toggle {
@@ -84,8 +134,29 @@
   <div id="draftsBlock" hidden>
     <h2 id="draftsTitle">待确认</h2>
     <table id="drafts"><thead>
-      <tr><th>日期</th><th>流水</th><th>它认为这是</th><th>拟的分录</th></tr>
+      <tr><th>日期</th><th>流水</th><th>它认为这是</th><th>拟的分录</th><th></th></tr>
     </thead><tbody></tbody></table>
+    <div class="actions"><button id="confirmHigh" class="primary">确认全部可自动处理的</button>
+      <span class="hint" id="confirmHint">只确认它拿得准的那些；标了「我猜的」需要你自己看一眼</span></div>
+  </div>
+
+  <div id="manualBlock">
+    <h2>手工记一笔 <span class="sub">计提、结转、调整——银行流水里没有的业务</span></h2>
+    <div class="card">
+      <div class="frow">
+        <label>日期<input type="date" id="mDate"></label>
+        <label class="grow">摘要<input type="text" id="mSummary" maxlength="40" placeholder="例：计提 11 月房租"></label>
+      </div>
+      <table id="mLines"><thead>
+        <tr><th style="width:76px">借/贷</th><th>科目</th><th class="num" style="width:150px">金额（元）</th>
+          <th style="width:156px">对方</th><th style="width:36px"></th></tr>
+      </thead><tbody></tbody></table>
+      <div class="actions">
+        <button class="row" id="mAddLine">+ 加一行</button>
+        <button class="primary" id="mPost">记入账本</button>
+        <span class="hint bal" id="mBalance"></span>
+      </div>
+    </div>
   </div>
 
   <h2>凭证清单</h2>
@@ -95,8 +166,14 @@
 
   <h2>科目余额</h2>
   <table id="balances"><thead>
-    <tr><th>科目</th><th class="num">借方</th><th class="num">贷方</th><th class="num">余额</th></tr>
+    <tr><th>科目</th><th class="num">借方</th><th class="num">贷方</th><th class="num">余额<span class="hint" style="display:block;font-weight:400">借正／贷负</span></th></tr>
   </thead><tbody></tbody></table>
+
+  <h2>利润表 <span class="sub">本年累计</span></h2>
+  <table id="income"><tbody></tbody></table>
+
+  <h2>资产负债表</h2>
+  <table id="sheet"><tbody></tbody></table>
 
   <footer>
     <button class="diag-toggle" id="diagToggle" aria-expanded="false"></button>
@@ -128,12 +205,181 @@ function alertHtml(issues) {
     <ul>${it.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('');
 }
 
+/* ── 手工记账 ──────────────────────────────────────────────────────
+ * 表单只建一次：`load()` 会重绘所有数据区，若把表单也放进重绘，
+ * 用户填到一半按了个确认，输入就没了。
+ */
+const CATEGORY_LABEL = { ASSET: '资产', LIABILITY: '负债', EQUITY: '所有者权益', COST: '成本', PNL: '损益' };
+let formReady = false;
+
+function accountOptions(accounts) {
+  const groups = new Map();
+  for (const item of accounts) {
+    const key = item.category || 'PNL';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  // 首项是空值：**不给默认科目**。默认成"库存现金"看似省事，
+  // 但用户直接填金额就能记，记出来的科目十有八九不是他想的那个。
+  return '<option value="">选择科目…</option>' +
+    ['ASSET', 'LIABILITY', 'EQUITY', 'PNL']
+      .filter((key) => groups.has(key))
+      .map((key) =>
+        `<optgroup label="${CATEGORY_LABEL[key]}">` +
+        groups.get(key).map((a) => `<option value="${esc(a.code)}">${esc(a.code)} ${esc(a.name)}</option>`).join('') +
+        '</optgroup>')
+      .join('');
+}
+
+/** 只在算「还差多少」时用。真正落账的金额由服务端 `parseYuan` 解析——这边算错不会记错账。 */
+function toCents(text) {
+  const cleaned = String(text).replace(/[,，\s]/g, '').replace(/^[¥￥]/, '');
+  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return null;
+  const parts = cleaned.split('.');
+  return Number(parts[0]) * 100 + Number((parts[1] || '').padEnd(2, '0'));
+}
+
+function manualLines() {
+  return [...pick('mLines').querySelectorAll('tr.line')].map((tr) => ({
+    accountCode: tr.querySelector('.mAcc').value,
+    direction: tr.querySelector('.mDir').value,
+    amount: tr.querySelector('.mAmt').value.trim(),
+    counterparty: tr.querySelector('.mCp').value.trim(),
+  }));
+}
+
+function updateBalance() {
+  const lines = manualLines();
+  let debit = 0;
+  let credit = 0;
+  let unreadable = false;
+  for (const line of lines) {
+    const cents = line.amount === '' ? 0 : toCents(line.amount);
+    if (cents === null) { unreadable = true; continue; }
+    if (line.direction === 'DEBIT') debit += cents; else credit += cents;
+  }
+  const el = pick('mBalance');
+  const button = pick('mPost');
+  const diff = debit - credit;
+  const noAccount = lines.filter((line) => line.accountCode === '').length;
+
+  let ready = false;
+  if (unreadable) {
+    el.className = 'hint bal bad';
+    el.textContent = '有金额读不出来：只能填数字，最多两位小数';
+  } else if (debit === 0 && credit === 0) {
+    el.className = 'hint bal';
+    el.textContent = '填上金额就能记';
+  } else if (noAccount > 0) {
+    el.className = 'hint bal bad';
+    el.textContent = `还有 ${noAccount} 行没选科目`;
+  } else if (diff !== 0) {
+    el.className = 'hint bal bad';
+    el.textContent = `借方 ${yuan(debit)} / 贷方 ${yuan(credit)}，还差 ${yuan(Math.abs(diff))} 在${diff > 0 ? '贷方' : '借方'}`;
+  } else {
+    el.className = 'hint bal ok';
+    el.textContent = `借贷平：${yuan(debit)}`;
+    ready = true;
+  }
+  button.disabled = !ready;
+}
+
+async function submitManual() {
+  const button = pick('mPost');
+  button.disabled = true;
+  button.textContent = '正在写入…';
+  try {
+    const res = await fetch('/api/voucher', {
+      method: 'POST',
+      headers: { 'x-token': token, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        voucherDate: pick('mDate').value,
+        summary: pick('mSummary').value,
+        lines: manualLines(),
+      }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error || 'HTTP ' + res.status);
+
+    // 只清空内容，日期留着：连着记同一天的好几笔是常态。
+    pick('mSummary').value = '';
+    for (const tr of pick('mLines').querySelectorAll('tr.line')) {
+      tr.querySelector('.mAmt').value = '';
+      tr.querySelector('.mCp').value = '';
+    }
+    await load();
+    pick('mSummary').focus();
+    pick('alert').insertAdjacentHTML(
+      'afterbegin',
+      `<div class="alert ok"><b>已记入 ${esc(out.voucherNo)}</b>${esc(out.periodId)} · 凭证编号 ${esc(out.voucherId)}</div>`,
+    );
+  } catch (e) {
+    pick('alert').insertAdjacentHTML(
+      'afterbegin',
+      `<div class="alert bad"><b>没有记进去</b>${esc(e.message)}</div>`,
+    );
+  } finally {
+    button.textContent = '记入账本';
+    updateBalance();
+  }
+}
+
+function buildManualForm(state) {
+  if (formReady) return;
+  formReady = true;
+  const options = accountOptions(state.accounts || []);
+  const body = pick('mLines').querySelector('tbody');
+
+  const addRow = (direction) => {
+    const tr = document.createElement('tr');
+    tr.className = 'line';
+    tr.innerHTML = `<td><select class="mDir"><option value="DEBIT">借</option><option value="CREDIT">贷</option></select></td>
+      <td><select class="mAcc">${options}</select></td>
+      <td class="num"><input class="mAmt" inputmode="decimal" placeholder="0.00"></td>
+      <td><input class="mCp" placeholder="往来科目才填"></td>
+      <td><button class="row mDel" title="删掉这行">×</button></td>`;
+    tr.querySelector('.mDir').value = direction;
+    body.append(tr);
+    return tr;
+  };
+
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  pick('mDate').value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+  addRow('DEBIT');
+  addRow('CREDIT');
+
+  body.addEventListener('input', updateBalance);
+  body.addEventListener('change', updateBalance);
+  body.addEventListener('click', (ev) => {
+    const button = ev.target instanceof Element ? ev.target.closest('.mDel') : null;
+    if (button === null) return;
+    // 少于两行就凑不出一借一贷，删到两行就停手。
+    if (body.querySelectorAll('tr.line').length <= 2) return;
+    const tr = button.closest('tr');
+    if (tr !== null) tr.remove();
+    updateBalance();
+  });
+
+  pick('mAddLine').onclick = () => {
+    addRow('DEBIT').querySelector('.mAmt').focus();
+    updateBalance();
+  };
+  pick('mPost').onclick = () => void submitManual();
+  pick('mSummary').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !pick('mPost').disabled) void submitManual();
+  });
+  updateBalance();
+}
+
 async function load() {
   const res = await fetch('/api/state', { headers: { 'x-token': token }, cache: 'no-store' });
   if (!res.ok) throw new Error(res.status === 401 ? '令牌无效：请用启动时打印的完整链接打开' : 'HTTP ' + res.status);
   const s = await res.json();
 
   pick('bookPath').textContent = s.rootDir;
+  buildManualForm(s);
 
   // ── 只在异常时说话 ────────────────────────────────────────────────
   // 正常不显示"全绿"：一个常态为真的指示灯，看过第一周就没人再看它。
@@ -164,6 +410,17 @@ async function load() {
       items: v.warnings.map((w) => `${w.code}${w.period ? ` · ${w.period}` : ''}${w.lineNo ? ` 第 ${w.lineNo} 行` : ''}：${w.message || ''}`),
     });
   }
+  // 两张表必须自洽：资产负债表上的「本期未结转损益」就是利润表的净利润。
+  // 变量名不叫 check 而叫 mismatch，是因为它算出来**恒应为 0**；非 0 说明有 5xxx 科目没进利润表。
+  const pnlMismatch = s.sheet.unclosedPnl - s.income.netProfit;
+  if (pnlMismatch !== 0) {
+    issues.push({
+      level: 'bad',
+      title: '利润表与资产负债表对不上',
+      body: `净利润 ${yuan(s.income.netProfit)}，账上未结转损益 ${yuan(s.sheet.unclosedPnl)}，差 ${yuan(pnlMismatch)}`,
+      items: ['这属于科目表口径问题（有损益类科目没被利润表收进来），不是录入错误。'],
+    });
+  }
   pick('alert').innerHTML = alertHtml(issues);
 
   // ── 页脚一行：正常时只是"账本完整"，点开才看明细 ────────────────────
@@ -189,13 +446,16 @@ async function load() {
     box.classList.toggle('open');
     toggle.setAttribute('aria-expanded', String(box.classList.contains('open')));
   };
-  toggle.addEventListener('click', toggleDiag);
+  // 用 onclick 而不是 addEventListener：确认落账后会再次 load()，
+  // addEventListener 会叠加第二个同名处理器，点一次等于点两次，明细永远打不开。
+  toggle.onclick = toggleDiag;
   if (new URLSearchParams(location.search).get('diag') === '1') toggleDiag();
 
   // ── 待确认草稿：没有就不出现（同"正常不显示"原则）────────────────────
   const drafts = (s.drafts || []).slice().sort((a, b) => (a.txn.date < b.txn.date ? 1 : -1));
+  // 先无条件赋值：确认完最后一次刷新时草稿会变空，不重置就会留着一屏旧行。
+  pick('draftsBlock').hidden = drafts.length === 0;
   if (drafts.length) {
-    pick('draftsBlock').hidden = false;
     pick('draftsTitle').textContent = `待确认（${drafts.length}）`;
     pick('drafts').querySelector('tbody').innerHTML = drafts.map((d) => {
       const unknown = d.lines.length === 0;
@@ -204,12 +464,16 @@ async function load() {
         : d.lines.map((l) => `${l.direction === 'DEBIT' ? '借' : '贷'} ${esc(l.accountName)} ${yuan(l.amountCents)}`).join('<br>');
       const guess = esc(d.oneLiner) + (d.assumed && d.assumed.length
         ? `<div class="assumed">我猜的：${d.assumed.map(esc).join('；')}</div>` : '');
+      // 单张确认：只说"需要你看一眼"却不给确认按钮，用户就只能在两种极端里挑
+      // —— 要么全确认，要么一张也确认不了。
+      const act = unknown ? '' : `<button class="row" data-confirm="${esc(d.draftId)}">确认这张</button>`;
       return `<tr class="${unknown ? 'unknown' : ''}">
         <td>${esc(d.txn.date)}</td>
         <td class="wrap"><span class="amt">${d.txn.direction === 'IN' ? '+' : '−'}${yuan(d.txn.amountCents)}</span>
           <div class="lines">${esc(d.txn.summary || '')}${d.txn.counterparty ? ' · ' + esc(d.txn.counterparty) : ''}</div></td>
         <td class="wrap">${guess}</td>
         <td class="lines">${lines}</td>
+        <td>${act}</td>
       </tr>`;
     }).join('');
   }
@@ -231,6 +495,100 @@ async function load() {
       <td class="num">${yuan(b.creditCents)}</td>
       <td class="num">${yuan(b.netDebitCents)}</td>
     </tr>`).join('') : '<tr><td colspan="4" class="empty">还没有余额</td></tr>';
+
+  // ── 利润表 / 资产负债表 ───────────────────────────────────────────
+  // 负数用红色而不是括号：括号是审计报表的惯例，但这是给创始人自己看的，
+  // 红色在这里不表示"亏损预警"，只表示"这个数是负的"。
+  const money = (c) => `<td class="num${c < 0 ? ' neg' : ''}">${yuan(c)}</td>`;
+  const row = (label, c, cls) => `<tr${cls ? ` class="${cls}"` : ''}><td>${esc(label)}</td>${money(c)}</tr>`;
+  const group = (title) => `<tr class="grp"><td colspan="2">${esc(title)}</td></tr>`;
+  const acct = (r) => `<tr><td><code>${esc(r.code)}</code> ${esc(r.name)}</td>${money(r.amountCents)}</tr>`;
+
+  const i = s.income;
+  pick('income').querySelector('tbody').innerHTML = [
+    row('营业收入', i.revenue),
+    row('减：营业成本', i.cost),
+    row('减：税金及附加', i.taxes),
+    row('减：销售费用', i.selling),
+    row('减：管理费用', i.admin),
+    row('减：财务费用', i.finance),
+    row('营业利润', i.operatingProfit, 'total'),
+    row('加：营业外收入', i.nonOperatingIncome),
+    row('减：营业外支出', i.nonOperatingExpense),
+    row('利润总额', i.profitBeforeTax, 'total'),
+    row('减：所得税费用', i.incomeTax),
+    row('净利润', i.netProfit, 'total'),
+  ].join('');
+
+  const bs = s.sheet;
+  const parts = [
+    group('资产'),
+    ...bs.assetRows.map(acct),
+    row('资产合计', bs.assets, 'total'),
+    group('负债'),
+    ...bs.liabilityRows.map(acct),
+    row('负债合计', bs.liabilities, 'total'),
+    group('所有者权益'),
+    ...bs.equityRows.map(acct),
+    // 单列一行，不并进"利润分配"。并进去报表会看起来平了，
+    // 但看不出这笔钱还没做过期末结转——模糊的平账比明确的不平更危险。
+    row('本期未结转损益', bs.unclosedPnl),
+    row('所有者权益合计', bs.equity + bs.unclosedPnl, 'total'),
+    row('负债和所有者权益总计', bs.liabilities + bs.equity + bs.unclosedPnl, 'total'),
+  ];
+  if (!bs.balanced) parts.push(row('差额', bs.diffCents, 'total neg'));
+  pick('sheet').querySelector('tbody').innerHTML = parts.join('');
+
+  // ── 确认落账 ──────────────────────────────────────────────────────
+  const confirmBtn = pick('confirmHigh');
+  const autoCount = drafts.filter((d) => d.confidence === 'HIGH' && d.lines.length > 0).length;
+  confirmBtn.hidden = autoCount === 0;
+  pick('confirmHint').hidden = autoCount === 0;
+  confirmBtn.disabled = false;
+  confirmBtn.textContent = autoCount > 1 ? `确认全部可自动处理的（${autoCount}）` : '确认全部可自动处理的';
+
+  let busy = false;
+  const doConfirm = async (ids) => {
+    if (busy) return;
+    busy = true;
+    confirmBtn.disabled = true;
+    try {
+      const res2 = await fetch('/api/confirm', {
+        method: 'POST',
+        headers: { 'x-token': token, 'content-type': 'application/json' },
+        body: JSON.stringify(ids ? { ids } : {}),
+      });
+      const out = await res2.json();
+      if (!res2.ok) throw new Error(out.error || 'HTTP ' + res2.status);
+
+      // 先刷新再提示：提示条挂在页面顶部，若刷新失败它会跟着消失，用户以为成功了。
+      await load();
+      const head = out.confirmed > 0 ? `已落账 ${out.confirmed} 张凭证` : '没有落账';
+      const detail = out.skipped.map((x) => x.reason).join('；');
+      pick('alert').insertAdjacentHTML(
+        'afterbegin',
+        `<div class="alert ${out.skipped.length ? 'warn' : 'ok'}"><b>${esc(head)}</b>${
+          out.skipped.length ? `还有 ${out.skipped.length} 张没落账：${esc(detail)}` : '账本已重新校验，结果见下方。'
+        }</div>`,
+      );
+    } catch (e) {
+      // 失败时不要把按钮恢复成"可再点一次"的假象：可能已经写进一部分，重试会重复落账。
+      // 让用户刷新页面重新看状态，比在这里猜安全。
+      confirmBtn.textContent = '写入失败，请刷新页面';
+      pick('alert').insertAdjacentHTML(
+        'afterbegin',
+        `<div class="alert bad"><b>没有写入账本</b>${esc(e.message)}</div>`,
+      );
+    } finally {
+      busy = false;
+    }
+  };
+
+  confirmBtn.onclick = () => doConfirm(undefined);
+  pick('drafts').querySelector('tbody').onclick = (ev) => {
+    const id = ev.target instanceof Element ? ev.target.getAttribute('data-confirm') : null;
+    if (id) void doConfirm([id]);
+  };
 }
 
 load().catch((e) => {

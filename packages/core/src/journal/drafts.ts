@@ -17,6 +17,14 @@ export interface DraftStore {
   /** 追加草稿；已存在同 `draftId` 的跳过。返回新增与跳过条数。 */
   appendAll(drafts: readonly Draft[]): Promise<{ added: number; skipped: number }>;
   readAll(): Promise<Draft[]>;
+  /**
+   * 把已落账的草稿移出待确认区。
+   *
+   * **不是删除，是归档**：移到 `drafts/confirmed/` 而不是抹掉。
+   * 理由是可追溯——三个月后有人问"这笔当时系统是怎么判断的"，
+   * 凭证上只有规则 ID，而当时的草稿里有完整的一句人话和「我猜的」。
+   */
+  archive(ids: readonly string[]): Promise<number>;
 }
 
 const DRAFT_DIR = 'drafts';
@@ -86,5 +94,49 @@ export async function createDraftStore(rootDir: string): Promise<DraftStore> {
       return { added, skipped };
     },
     readAll,
+    async archive(ids) {
+      if (ids.length === 0) return 0;
+      const target = new Set(ids);
+      const all = await readAll();
+      const moving = all.filter((draft) => target.has(draft.draftId));
+      if (moving.length === 0) return 0;
+
+      // 先写归档，再重写待确认区。顺序反了会在中途崩溃时丢草稿；
+      // 顺序对了最坏情况是"归档里有、待确认区也有"，用户多看一眼就能发现。
+      const archiveDir = join(dir, 'confirmed');
+      await mkdir(archiveDir, { recursive: true });
+      const movingByPeriod = new Map<string, Draft[]>();
+      for (const draft of moving) {
+        const period = periodOf(draft.txn.date);
+        const bucket = movingByPeriod.get(period) ?? [];
+        bucket.push(draft);
+        movingByPeriod.set(period, bucket);
+      }
+      for (const [period, bucket] of movingByPeriod) {
+        const path = join(archiveDir, `${period}.jsonl`);
+        let prefix = '';
+        try {
+          const current = await readFile(path, 'utf8');
+          prefix = current === '' || current.endsWith('\n') ? current : `${current}\n`;
+        } catch {
+          prefix = '';
+        }
+        await writeFile(path, `${prefix}${bucket.map((draft) => JSON.stringify(draft)).join('\n')}\n`, 'utf8');
+      }
+
+      // 重写待确认区，去掉已归档的。
+      const remainingByPeriod = new Map<string, Draft[]>();
+      const allFiles = (await readdir(dir).catch(() => [] as string[])).filter((name) => name.endsWith('.jsonl'));
+      for (const name of allFiles) {
+        const period = name.replace(/\.jsonl$/, '');
+        const keep = all.filter((draft) => periodOf(draft.txn.date) === period && !target.has(draft.draftId));
+        remainingByPeriod.set(period, keep);
+      }
+      for (const [period, keep] of remainingByPeriod) {
+        const path = join(dir, `${period}.jsonl`);
+        await writeFile(path, keep.length === 0 ? '' : `${keep.map((draft) => JSON.stringify(draft)).join('\n')}\n`, 'utf8');
+      }
+      return moving.length;
+    },
   };
 }
