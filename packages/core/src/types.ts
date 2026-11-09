@@ -424,6 +424,65 @@ export interface AssertionResult {
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /**
+ * 链断裂的原因（2026-11-09 由 `journal/chain.ts` **上移**至此，见 D002-D2-2）。
+ *
+ * 为什么上移：`JournalPort.verify` 要返回它，而 `JournalPort` 在本文件；若仍声明在
+ * `journal/chain.ts`，就会形成 types → journal 的反向依赖（types 是零依赖的叶子）。
+ * 这两个类型本来就是跨泳道的 DTO（A 产出、D 展示、E 留痕），放在契约文件里才是它们的位置。
+ *
+ * 七个值分开的理由是**处置方式不同**，不是分类癖：
+ * 内容被改查来源、指针错查备份、顺序错查脚本、锚点不符查"末尾是否被删"、
+ * 坏行查"哪一行丢了"——合并成一个 `CHAIN_BROKEN` 等于让使用者无从下手。
+ */
+export type ChainBreakReason =
+  /** 重算 hash ≠ 落盘 hash：内容被改过（金额、科目、依据、期间都落在这条）。 */
+  | 'HASH_MISMATCH'
+  /** `prevHash` 指向的不是落账顺序的前一张：断链、中间一张被删、或凭证被搬到别的分片。 */
+  | 'PREV_HASH_MISMATCH'
+  /** 内容与指针各自正确，但文件里的先后与链序矛盾：行被对调/插入。 */
+  | 'ORDER_MISMATCH'
+  /** 分叉：不止一张凭证指向同一个 prevHash。 */
+  | 'FORK'
+  /** 凭证里有无法规范化序列化的东西（含未登记字段），无法判定真伪。 */
+  | 'CANONICALIZE_FAILED'
+  /**
+   * 链尾与链外锚点 `journal/.head.json` 不符（D002-D2-5）。
+   * 为什么不靠链内字段判断：链内无法区分「末尾被删」与「从来没记过」，只能靠锚点。
+   */
+  | 'HEAD_MISMATCH'
+  /** 分片里出现无法解析的行（不是尾部残片）：数据丢了或被手改，不能给绿。 */
+  | 'UNPARSEABLE_LINE';
+
+/** journal 异常的种类。每一项都必须显形（A7），不许静默。 */
+export type JournalWarningCode =
+  /** 末尾半行（写入中断电），已跳过。 */
+  | 'TRUNCATED_TAIL'
+  /** 完整但解析不出凭证（含修复残片后留下的垃圾行），已跳过。 */
+  | 'UNPARSEABLE_LINE'
+  /** `periodId` 与所在分片不一致：文件被人工搬过。 */
+  | 'SHARD_MISMATCH'
+  /** 启动时发现不止一张「链尾」，链已分叉。 */
+  | 'CHAIN_TAIL_AMBIGUOUS'
+  /**
+   * 锚点文件缺失但 journal 非空：此时只能证明「文件内自洽」，
+   * 无法判断末尾有没有被删。**这不是错误，是一块必须交出去的盲区。**
+   */
+  | 'HEAD_MISSING';
+
+/**
+ * 一条必须随结论一起交出去的异常。
+ *
+ * 为什么不合并进 `ok`：`ok` 是布尔，装不下「哪里、第几行、为什么」；
+ * 而判断不了位置的异常，在交付包里等于没出现。
+ */
+export interface JournalWarning {
+  readonly code: JournalWarningCode;
+  readonly period: string;
+  readonly lineNo: number;
+  readonly message: string;
+}
+
+/**
  * journal 的唯一写入口。**任何人不得绕过它直写 `journal/*.jsonl`。**
  *
  * 为什么用接口而不是函数集合：接口是「只能有一个实现被注入」的约束，
@@ -456,6 +515,15 @@ export interface JournalPort {
    * 校验整条哈希链。
    * @returns `ok: false` 时 `breakAt` 必须精确指出断点的 `voucherId`
    *          ——只说「链断了」无法定位，等于没查。
+   *
+   * 2026-11-09 追加 `reason` / `warnings`（D002-D2-2，纯加宽，三个字段都不进哈希域）：
+   * 只有布尔的话，D 泳道只能显示「链断了」，用户无从判断该去查来源、查备份还是查锚点。
+   * `warnings` 为「不改变 ok 但必须打印」的显形通道（如尾部残片、锚点缺失）。
    */
-  verify(): Promise<{ ok: boolean; breakAt?: string }>;
+  verify(): Promise<{
+    ok: boolean;
+    breakAt?: string;
+    reason?: ChainBreakReason;
+    warnings?: readonly JournalWarning[];
+  }>;
 }

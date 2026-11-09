@@ -5,7 +5,8 @@
   "description": "会计内核：纯函数、零 IO、零运行期依赖",
   "main": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./journal": "./src/journal/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p ."
