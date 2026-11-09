@@ -1,0 +1,83 @@
+{
+  "provider": "icbc-debit-v1",
+  "count": 11,
+  "txns": [
+    {
+      "date": "2023-05-02",
+      "direction": "OUT",
+      "amountCents": 1340,
+      "counterparty": "深圳市财付通支付科技有限公司",
+      "summary": "消费"
+    },
+    {
+      "date": "2023-04-25",
+      "direction": "OUT",
+      "amountCents": 123456,
+      "counterparty": "张三",
+      "summary": "自动还款"
+    },
+    {
+      "date": "2023-04-22",
+      "direction": "IN",
+      "amountCents": 123456,
+      "counterparty": "李四",
+      "summary": "他行汇入"
+    },
+    {
+      "date": "2023-04-20",
+      "direction": "OUT",
+      "amountCents": 123456,
+      "counterparty": "银联无卡支付业务((特约)掌上生活还款)",
+      "summary": "银联消费"
+    },
+    {
+      "date": "2023-04-14",
+      "direction": "IN",
+      "amountCents": 123456,
+      "counterparty": "ABC公司",
+      "summary": "工资"
+    },
+    {
+      "date": "2023-04-14",
+      "direction": "OUT",
+      "amountCents": 50000,
+      "counterparty": "王五",
+      "summary": "网转"
+    },
+    {
+      "date": "2023-02-28",
+      "direction": "IN",
+      "amountCents": 34158,
+      "counterparty": "支付宝（中国）网络技术有限公司",
+      "summary": "蚂蚁基金赎回到银行"
+    },
+    {
+      "date": "2023-02-20",
+      "direction": "OUT",
+      "amountCents": 123456,
+      "counterparty": "张三",
+      "summary": "跨行汇款"
+    },
+    {
+      "date": "2023-02-10",
+      "direction": "IN",
+      "amountCents": 3000,
+      "counterparty": "总行信用卡合伙人",
+      "summary": "合伙人返现"
+    },
+    {
+      "date": "2023-02-09",
+      "direction": "OUT",
+      "amountCents": 2400,
+      "counterparty": "深圳市财付通支付科技有限公司",
+      "summary": "消费"
+    },
+    {
+      "date": "2023-02-08",
+      "direction": "IN",
+      "amountCents": 104,
+      "counterparty": "深圳市财付通支付科技有限公司",
+      "summary": "退款"
+    }
+  ]
+}

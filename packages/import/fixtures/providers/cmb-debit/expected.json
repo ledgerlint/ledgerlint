@@ -1,0 +1,41 @@
+{
+  "provider": "cmb-debit",
+  "count": 5,
+  "txns": [
+    {
+      "date": "2024-01-01",
+      "direction": "IN",
+      "amountCents": 123400,
+      "counterparty": "北京住房公积金管理中心1111111111",
+      "summary": "代发住房公积金"
+    },
+    {
+      "date": "2024-01-01",
+      "direction": "OUT",
+      "amountCents": 100000,
+      "counterparty": "张三 66666666666666",
+      "summary": "转账汇款"
+    },
+    {
+      "date": "2024-01-27",
+      "direction": "OUT",
+      "amountCents": 300,
+      "counterparty": "国网电力有限公司99999999999999",
+      "summary": "一网通支付"
+    },
+    {
+      "date": "2024-01-20",
+      "direction": "OUT",
+      "amountCents": 100000,
+      "counterparty": "",
+      "summary": "银联ATM取款"
+    },
+    {
+      "date": "2024-01-23",
+      "direction": "OUT",
+      "amountCents": 1014,
+      "counterparty": "抖音电商商家888888888",
+      "summary": "快捷支付"
+    }
+  ]
+}

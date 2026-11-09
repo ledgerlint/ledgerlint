@@ -1,0 +1,48 @@
+{
+  "provider": "alipay-gbk",
+  "count": 6,
+  "txns": [
+    {
+      "date": "2023-02-12",
+      "direction": "OUT",
+      "amountCents": 4974,
+      "counterparty": "xxxxxxxxxxxx",
+      "summary": "亲情卡"
+    },
+    {
+      "date": "2023-02-08",
+      "direction": "OUT",
+      "amountCents": 2000,
+      "counterparty": "x4***6",
+      "summary": "商品示例"
+    },
+    {
+      "date": "2023-02-02",
+      "direction": "OUT",
+      "amountCents": 9934,
+      "counterparty": "蚂蚁财富-蚂蚁（杭州）基金销售有限公司",
+      "summary": "蚂蚁财富-交银定期支付双息平衡混合-卖出至余额宝"
+    },
+    {
+      "date": "2023-01-18",
+      "direction": "IN",
+      "amountCents": 22222850,
+      "counterparty": "xxxx",
+      "summary": "转账"
+    },
+    {
+      "date": "2023-07-10",
+      "direction": "OUT",
+      "amountCents": 990,
+      "counterparty": "xxxx",
+      "summary": "xxxx"
+    },
+    {
+      "date": "2023-07-10",
+      "direction": "OUT",
+      "amountCents": 8200,
+      "counterparty": "xxxx",
+      "summary": "xxxx"
+    }
+  ]
+}

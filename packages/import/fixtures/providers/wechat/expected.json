@@ -1,0 +1,118 @@
+{
+  "provider": "wechat",
+  "count": 16,
+  "txns": [
+    {
+      "date": "2019-09-26",
+      "direction": "OUT",
+      "amountCents": 2816,
+      "counterparty": "云膳过桥米线(传奇广场店)",
+      "summary": "总共消费:28.16"
+    },
+    {
+      "date": "2019-09-24",
+      "direction": "IN",
+      "amountCents": 35,
+      "counterparty": "同性好友",
+      "summary": "/"
+    },
+    {
+      "date": "2021-01-17",
+      "direction": "OUT",
+      "amountCents": 1200,
+      "counterparty": "某餐厅",
+      "summary": "收款方备注:二维码收款"
+    },
+    {
+      "date": "2021-01-22",
+      "direction": "OUT",
+      "amountCents": 50000,
+      "counterparty": "房东",
+      "summary": "转账备注:微信转账"
+    },
+    {
+      "date": "2020-11-27",
+      "direction": "IN",
+      "amountCents": 2300,
+      "counterparty": "用户A",
+      "summary": "收款方备注:二维码收款"
+    },
+    {
+      "date": "2021-10-19",
+      "direction": "OUT",
+      "amountCents": 224346,
+      "counterparty": "哈哈",
+      "summary": "亲属卡"
+    },
+    {
+      "date": "2021-12-15",
+      "direction": "OUT",
+      "amountCents": 1200,
+      "counterparty": "某餐厅",
+      "summary": "测试 T+1"
+    },
+    {
+      "date": "2021-12-15",
+      "direction": "OUT",
+      "amountCents": 1200,
+      "counterparty": "某餐厅",
+      "summary": "测试 T-1"
+    },
+    {
+      "date": "2021-07-18",
+      "direction": "IN",
+      "amountCents": 7,
+      "counterparty": "打开拼多多，点击底部多多视频",
+      "summary": "/"
+    },
+    {
+      "date": "2022-07-18",
+      "direction": "IN",
+      "amountCents": 7,
+      "counterparty": "测试时间戳，点击底部多多视频",
+      "summary": "/"
+    },
+    {
+      "date": "2022-09-24",
+      "direction": "OUT",
+      "amountCents": 3699,
+      "counterparty": "YingDev",
+      "summary": "/"
+    },
+    {
+      "date": "2023-06-23",
+      "direction": "IN",
+      "amountCents": 500,
+      "counterparty": "赞赏作者的收款_20230623",
+      "summary": "/"
+    },
+    {
+      "date": "2023-07-09",
+      "direction": "OUT",
+      "amountCents": 990,
+      "counterparty": "美团平台商户",
+      "summary": "美团订单-12345"
+    },
+    {
+      "date": "2023-07-09",
+      "direction": "OUT",
+      "amountCents": 5000,
+      "counterparty": "美团平台商户",
+      "summary": "美团订单-54321"
+    },
+    {
+      "date": "2024-06-07",
+      "direction": "OUT",
+      "amountCents": 1,
+      "counterparty": "腾讯公益慈善基金会",
+      "summary": "焕新乐园"
+    },
+    {
+      "date": "2024-06-07",
+      "direction": "OUT",
+      "amountCents": 1,
+      "counterparty": "测试",
+      "summary": "ignore-invalid-tx-types"
+    }
+  ]
+}
