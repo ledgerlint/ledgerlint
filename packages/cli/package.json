@@ -1,0 +1,13 @@
+{
+  "name": "@ledgerlint/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "npx 启动器：一行命令拉起本地 web，只听 127.0.0.1",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  }
+}

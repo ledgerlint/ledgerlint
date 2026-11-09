@@ -1,0 +1,13 @@
+{
+  "name": "@ledgerlint/web",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "确认页 + 交付包页（两页，不引入 Vite 构建，见 T33）",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  }
+}

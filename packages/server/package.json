@@ -1,0 +1,13 @@
+{
+  "name": "@ledgerlint/server",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "本地 HTTP 层：只依赖 core 的类型与纯函数，路由数 ≤12",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  }
+}

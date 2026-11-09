@@ -1,0 +1,13 @@
+{
+  "name": "@ledgerlint/import",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "流水与发票解析：纯函数，输出 Transaction，不碰 journal",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  }
+}

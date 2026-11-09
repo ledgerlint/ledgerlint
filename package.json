@@ -1,0 +1,24 @@
+{
+  "name": "openledger",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "把一家小企业的银行流水与发票，变成一份带机检与局限说明的凭证草稿包（本地、纯文本、可审计）",
+  "license": "AGPL-3.0-or-later",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck -w @ledgerlint/core -w @ledgerlint/import -w @ledgerlint/server -w @ledgerlint/web -w @ledgerlint/cli",
+    "test": "vitest run",
+    "lines": "node scripts/count-lines.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3",
+    "vitest": "^5.1.0"
+  }
+}

@@ -1,0 +1,17 @@
+# 统一按 LF 存储，避免 Windows 开发 / Linux CI 之间出现整文件 diff
+* text=auto eol=lf
+
+# 二进制文件不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.tgz binary
+
+# 账本测试数据按文本处理（可 diff、可 review）
+*.jsonl text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf

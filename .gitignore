@@ -1,0 +1,29 @@
+# 依赖与构建产物
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# 测试账套（用户数据，绝不入仓；形态见 docs/2026-11-09-MVP定义与商业化.md §5）
+mybook/
+tmp/
+.tmp/
+
+# 编辑器
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# 本地环境变量（token / 端口等）
+.env
+.env.*
+!.env.example
+
+# WorkBuddy 会话与工作日志（内部记录，不入公开仓库）
+.workbuddy/
