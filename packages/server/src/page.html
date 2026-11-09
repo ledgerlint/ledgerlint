@@ -87,9 +87,6 @@
     <tr><th>科目</th><th class="num">借方</th><th class="num">贷方</th><th class="num">余额</th></tr>
   </thead><tbody></tbody></table>
 
-  <h2>它查不出什么</h2>
-  <div class="notice"><ul id="limits"></ul></div>
-
   <footer>
     <button class="diag-toggle" id="diagToggle" aria-expanded="false"></button>
     <div id="diag"><dl id="diagList"></dl></div>
@@ -201,8 +198,6 @@ async function load() {
       <td class="num">${yuan(b.creditCents)}</td>
       <td class="num">${yuan(b.netDebitCents)}</td>
     </tr>`).join('') : '<tr><td colspan="4" class="empty">还没有余额</td></tr>';
-
-  pick('limits').innerHTML = (s.limitations || []).map((t) => `<li>${esc(t)}</li>`).join('');
 }
 
 load().catch((e) => {
