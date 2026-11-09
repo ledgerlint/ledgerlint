@@ -67,6 +67,7 @@ describe('balances / trialBalance', () => {
       voucherId: 'V1',
       voucherDate: '2026-03-10',
       voucherNo: makeVoucherNo(1),
+      summary: '测试凭证摘要',
       lines: [
         entryLine('1122', 'DEBIT', 300_000, { counterparty: '甲客户' }),
         entryLine('5001', 'CREDIT', 200_000),
@@ -94,6 +95,7 @@ describe('balances / trialBalance', () => {
       voucherId: 'V1',
       voucherDate: '2026-03-10',
       voucherNo: makeVoucherNo(1),
+      summary: '测试凭证摘要',
       lines: [entryLine('1122', 'DEBIT', 100_000, { counterparty: '甲客户' }), entryLine('5001', 'CREDIT', 100_000)],
       source: 'MANUAL',
     });
@@ -109,6 +111,7 @@ describe('balances / trialBalance', () => {
       voucherId: 'V1',
       voucherDate: '2026-03-10',
       voucherNo: makeVoucherNo(1),
+      summary: '测试凭证摘要',
       lines: [
         entryLine('1002', 'DEBIT', 1_000_000),
         entryLine('1012', 'DEBIT', 200_000),
@@ -129,6 +132,7 @@ describe('红冲：净额归零，但两张凭证都在', () => {
       voucherId: 'V1',
       voucherDate: '2026-03-10',
       voucherNo: makeVoucherNo(1),
+      summary: '测试凭证摘要',
       lines: [entryLine('1122', 'DEBIT', 500_000, { counterparty: '甲客户' }), entryLine('5001', 'CREDIT', 500_000)],
       source: 'IMPORT',
     });
@@ -158,6 +162,7 @@ describe('红冲：净额归零，但两张凭证都在', () => {
       voucherId: 'V1',
       voucherDate: '2026-03-31',
       voucherNo: makeVoucherNo(1),
+      summary: '测试凭证摘要',
       lines: [entryLine('1122', 'DEBIT', 500_000, { counterparty: '甲客户' }), entryLine('5001', 'CREDIT', 500_000)],
       source: 'IMPORT',
     });
@@ -193,6 +198,7 @@ describe('期间与日期取数', () => {
       voucherId: 'V1',
       voucherDate: '2026-03-10',
       voucherNo: makeVoucherNo(1),
+      summary: '测试凭证摘要',
       lines: [entryLine('1002', 'DEBIT', 1_000), entryLine('5001', 'CREDIT', 1_000)],
       source: 'MANUAL',
     });

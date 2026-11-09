@@ -23,6 +23,7 @@ function body(overrides: Partial<VoucherBody> = {}): VoucherBody {
     periodId: '2026-11',
     voucherNo: '记-0001',
     voucherDate: '2026-11-05',
+    summary: '收到客户货款',
     lines: [
       { accountCode: '1002', accountName: '银行存款', direction: 'DEBIT', amountCents: 203_000 },
       { accountCode: '6001', accountName: '主营业务收入', direction: 'CREDIT', amountCents: 203_000 },
@@ -106,10 +107,13 @@ describe('链头与哈希口径', () => {
     );
   });
 
-  it('字段顺序是常量数组，canonicalize 输出里 prevHash 打头、hash 不参与', () => {
+  it('字段顺序是常量数组，canonicalize 输出里 prevHash 打头、hash 不参与，summary 在 lines 之前', () => {
     const text = canonicalize({ ...body(), prevHash: GENESIS_PREV_HASH, hash: 'forged' });
     expect(text.startsWith(`{"prevHash":"${GENESIS_PREV_HASH}"`)).toBe(true);
     expect(text).not.toContain('"hash"');
+    // 顺序即协议（D004）：摘要属于抬头信息，必须排在分录之前、日期之后
+    expect(text.indexOf('"voucherDate"')).toBeLessThan(text.indexOf('"summary"'));
+    expect(text.indexOf('"summary"')).toBeLessThan(text.indexOf('"lines"'));
   });
 
   it('未登记字段必须抛错，不许静默不进哈希', () => {

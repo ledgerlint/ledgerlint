@@ -103,6 +103,7 @@ const SAMPLE_VOUCHER: PostedVoucher = {
   periodId: '2026-11',
   voucherNo: '记-0001',
   voucherDate: '2026-11-03',
+  summary: '收到客户设计服务费，记收入并计提增值税',
   lines: SAMPLE_LINES,
   totalDebitCents: 203_000,
   totalCreditCents: 203_000,
@@ -315,6 +316,13 @@ describe('契约的类型级防线', () => {
   it('EventKey 是封闭值域，值域外的值必须编译失败', () => {
     // @ts-expect-error E17 不在冻结值域内（值域只允许追加，追加须走 D001 §三 的流程）
     const notInDomain: EventKey = 'E17';
+
+    expect(notInDomain).toBeDefined();
+  });
+
+  it('凭证来源值域已收缩：RECON 不再是合法来源（D004 §7.1 删除）', () => {
+    // @ts-expect-error MVP 勾稽只出差异清单、不产凭证；留一个无生产者也无摘要来源的值就是「声明了但没人实现」
+    const notInDomain: PostedVoucher['source'] = 'RECON';
 
     expect(notInDomain).toBeDefined();
   });

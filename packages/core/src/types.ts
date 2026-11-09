@@ -321,6 +321,24 @@ export interface PostedVoucher {
   /** 记账日期 `YYYY-MM-DD`。`periodId` 的唯一来源。 */
   readonly voucherDate: string;
 
+  /**
+   * 摘要。**必填且非空；≤40 字。会计翻开凭证第一眼看的就是它。**
+   *
+   * 2026-11-09 追加（D004，业务字段变更，交付总监代签）。为什么不能事后补：它进哈希，
+   * 补一次就等于全部历史凭证 hash 失效，只能断链迁移或写一版兼容序列化 + 双链并存。
+   *
+   * 为什么它是「事实内容」而不是可选展示字段：没有摘要的借贷两行，看不出这是销售、
+   * 借款还是转账 —— 而这三者在试算平衡里都是平的。规则凭证尚可借 `RuleHit.oneLiner`，
+   * `MANUAL` / `REVERSE` 凭证连 `RuleHit` 都没有。
+   *
+   * 为什么不许塞进 `ruleSnapshot`：那里是「落账时生效的规则及版本」，是**配置快照**；
+   * 往里写叙述文本会把「我说了什么」伪装成「规则是什么」，且该键无 schema 约束，
+   * 任何调用方都能写任何内容。
+   *
+   * 粒度是**凭证级**，不是分录级（MVP 一张凭证 = 一个经济事件）。
+   */
+  readonly summary: string;
+
   /** 分录。为什么是数组而不是「借一条贷一条」：一借多贷（如代扣个税）是常态。 */
   readonly lines: readonly JournalLine[];
 
@@ -331,11 +349,16 @@ export interface PostedVoucher {
   readonly totalCreditCents: Cents;
 
   /**
-   * 凭证来源。`REVERSE` 是红冲（不是删除），`RECON` 是勾稽调整。
+   * 凭证来源。`REVERSE` 是红冲（不是删除）。
    * 为什么不让来源可选：来源决定这张凭证能不能被自动重算，缺省会让「人工改过的凭证」
    * 在下一次导入时被规则覆盖掉。
+   *
+   * 为什么**没有** `'RECON'`（勾稽调整）：2026-11-09 删除（D004 §7.1）。MVP 的勾稽只出
+   * 差异清单、不产凭证 —— 留一个既无生产者、又无摘要来源的值，等于给未来一个「看起来支持」
+   * 的错觉（BP2 的 `auxRequired` 声明 21 处、只实现 4 处，同一种病换了个位置）。
+   * v0.2 真要做勾稽调整凭证，届时连同摘要来源与格式化规则一起加，不要先留口子。
    */
-  readonly source: 'IMPORT' | 'MANUAL' | 'RECON' | 'REVERSE';
+  readonly source: 'IMPORT' | 'MANUAL' | 'REVERSE';
 
   /** 红冲指向原 `voucherId`。只在 `source === 'REVERSE'` 时出现——红冲是新增一张反向凭证。 */
   readonly reverses?: string;

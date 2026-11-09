@@ -32,6 +32,7 @@ function draft(
     periodId: period,
     voucherNo: `记-${serial}`,
     voucherDate: `${period}-${options.day ?? '05'}`,
+    summary: `第 ${serial} 笔测试流水`,
     lines: [
       { accountCode: '1002', accountName: '银行存款', direction: 'DEBIT', amountCents },
       { accountCode: '6001', accountName: '主营业务收入', direction: 'CREDIT', amountCents },

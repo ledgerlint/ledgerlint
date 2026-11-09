@@ -1,21 +1,31 @@
 /**
- * 凭证落账的测试（T05）。
+ * 凭证落账的测试（T05 / D004）。
  *
  * 四类拒绝必须都在这里被咬住：日期、金额、借贷不平、往来对象缺失。
  * 第三条（借贷不平）**不允许有任何自动填平**：自动填平会让「差 1 分」这种真实错案
  * 在账上永远消失，而它正是 B1 要抓的东西。
+ *
+ * D004 追加的摘要有三条必须证明：非法摘要被拒、摘要确实在哈希域内（改它就断链）、
+ * 红冲摘要不接受自填。
  */
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { ACCOUNTS, AUX_OBJECT_CODES } from './accounts';
+import { createJournal } from './journal/io';
 import { entryLine } from './lines';
 import type { JournalLine } from './types';
-import type { PostErrorCode, PostedDraft } from './voucher';
+import type { PostErrorCode, PostedDraft, ReverseOptions, VoucherDraft } from './voucher';
 import {
   PostError,
+  SUMMARY_MAX_LENGTH,
   VOUCHER_NO_PREFIX,
   assertAuxiliary,
   assertEntriesPostable,
+  assertSummary,
   makeManualVoucher,
   makeVoucherNo,
   nextVoucherNo,
@@ -39,6 +49,18 @@ function expectPostError(run: () => unknown, code: PostErrorCode): void {
 function saleLines(counterparty?: string): JournalLine[] {
   const head = counterparty === undefined ? entryLine('1122', 'DEBIT', 100_000) : entryLine('1122', 'DEBIT', 100_000, { counterparty });
   return [head, entryLine('5001', 'CREDIT', 100_000)];
+}
+
+/** 一张可落账的凭证体，只差摘要——摘要的每一种非法形态都由它派生。 */
+function draftWith(summary: string): VoucherDraft {
+  return {
+    voucherId: 'S1',
+    voucherDate: '2026-03-10',
+    voucherNo: makeVoucherNo(1),
+    summary,
+    lines: saleLines('甲客户'),
+    source: 'MANUAL',
+  };
 }
 
 describe('凭证号', () => {
@@ -67,6 +89,7 @@ describe('post：合法凭证', () => {
       voucherId: 'V1',
       voucherDate: '2026-03-10',
       voucherNo: makeVoucherNo(1),
+      summary: '赊销设计服务费',
       lines: saleLines('甲客户'),
       source: 'IMPORT',
     });
@@ -83,6 +106,7 @@ describe('post：合法凭证', () => {
       voucherId: 'V2',
       voucherDate: '2026-03-31',
       voucherNo: makeVoucherNo(2),
+      summary: '计提代扣个税',
       lines: [
         entryLine('1122', 'DEBIT', 300_000, { counterparty: '乙客户' }),
         entryLine('5001', 'CREDIT', 200_000),
@@ -93,18 +117,27 @@ describe('post：合法凭证', () => {
     expect(posted.totalDebitCents).toBe(300_000);
     expect(posted.totalCreditCents).toBe(300_000);
   });
+
+  it('摘要随凭证落进凭证体（凭证级，不在分录上）', () => {
+    const posted = post(draftWith('支付办公室租金'));
+    expect(posted.summary).toBe('支付办公室租金');
+    expect(posted.lines.every((line) => Object.keys(line).includes('summary'))).toBe(false);
+  });
 });
 
 describe('post：必须拒绝的四类', () => {
   it('借贷不平 → UNBALANCED，且不允许自动填平', () => {
     const lines = [entryLine('1122', 'DEBIT', 100_000, { counterparty: '甲客户' }), entryLine('5001', 'CREDIT', 99_999)];
-    expectPostError(() => post({ voucherId: 'V3', voucherDate: '2026-03-10', voucherNo: '记-0003', lines, source: 'MANUAL' }), 'UNBALANCED');
+    expectPostError(
+      () => post({ voucherId: 'V3', voucherDate: '2026-03-10', voucherNo: '记-0003', summary: '赊销', lines, source: 'MANUAL' }),
+      'UNBALANCED',
+    );
   });
 
   it('差额文案要给出借、贷与差额三个数（用户才知道改哪边）', () => {
     const lines = [entryLine('1122', 'DEBIT', 203_000, { counterparty: '甲客户' }), entryLine('5001', 'CREDIT', 200_990)];
     try {
-      post({ voucherId: 'V4', voucherDate: '2026-03-10', voucherNo: '记-0004', lines, source: 'MANUAL' });
+      post({ voucherId: 'V4', voucherDate: '2026-03-10', voucherNo: '记-0004', summary: '赊销', lines, source: 'MANUAL' });
       expect.unreachable('借贷不平必须抛');
     } catch (error) {
       expect(error).toBeInstanceOf(PostError);
@@ -116,19 +149,37 @@ describe('post：必须拒绝的四类', () => {
 
   it('金额为 0 → 拒绝（红冲靠方向表达，不靠负号，所以 0 金额没有含义）', () => {
     const lines = [entryLine('1002', 'DEBIT', 0), entryLine('1002', 'CREDIT', 0)];
-    expectPostError(() => post({ voucherId: 'V5', voucherDate: '2026-03-10', voucherNo: '记-0005', lines, source: 'MANUAL' }), 'INVALID_AMOUNT');
+    expectPostError(
+      () => post({ voucherId: 'V5', voucherDate: '2026-03-10', voucherNo: '记-0005', summary: '转账', lines, source: 'MANUAL' }),
+      'INVALID_AMOUNT',
+    );
   });
 
   it('日期不是真实存在的日期 → INVALID_DATE（期间绝不独立赋值）', () => {
     expectPostError(
-      () => post({ voucherId: 'V6', voucherDate: '2026-02-30', voucherNo: '记-0006', lines: saleLines('甲客户'), source: 'MANUAL' }),
+      () =>
+        post({
+          voucherId: 'V6',
+          voucherDate: '2026-02-30',
+          voucherNo: '记-0006',
+          summary: '赊销',
+          lines: saleLines('甲客户'),
+          source: 'MANUAL',
+        }),
       'INVALID_DATE',
     );
   });
 
   it('只有一条分录 → 拒绝（单边凭证不可能平衡）', () => {
     expect(() =>
-      post({ voucherId: 'V7', voucherDate: '2026-03-10', voucherNo: '记-0007', lines: [entryLine('1002', 'DEBIT', 100)], source: 'MANUAL' }),
+      post({
+        voucherId: 'V7',
+        voucherDate: '2026-03-10',
+        voucherNo: '记-0007',
+        summary: '手续费',
+        lines: [entryLine('1002', 'DEBIT', 100)],
+        source: 'MANUAL',
+      }),
     ).toThrowError(PostError);
   });
 
@@ -139,13 +190,78 @@ describe('post：必须拒绝的四类', () => {
   });
 });
 
+describe('摘要：必填、非空白、≤40 字（D004）', () => {
+  it('空串 → 拒绝', () => {
+    expectPostError(() => post(draftWith('')), 'INVALID_SUMMARY');
+  });
+
+  it('纯空白 → 拒绝（空格不算填了，与 counterparty 同一条规则）', () => {
+    expectPostError(() => post(draftWith('   \t  ')), 'INVALID_SUMMARY');
+    expectPostError(() => assertSummary('　　'), 'INVALID_SUMMARY');
+    expectPostError(() => assertSummary(undefined), 'INVALID_SUMMARY');
+  });
+
+  it(`41 字 → 拒绝，且文案必须告诉用户「当前 N 字」`, () => {
+    try {
+      post(draftWith('租'.repeat(SUMMARY_MAX_LENGTH + 1)));
+      expect.unreachable('超长摘要必须拒绝');
+    } catch (error) {
+      expect(error).toBeInstanceOf(PostError);
+      expect((error as PostError).code).toBe('INVALID_SUMMARY');
+      expect((error as PostError).message).toContain(`当前 ${SUMMARY_MAX_LENGTH + 1} 字`);
+    }
+  });
+
+  it('正好 40 字可以过，且落账时去掉首尾空白（否则同一句话会算出两个 hash）', () => {
+    const posted = post(draftWith(`  ${'租'.repeat(SUMMARY_MAX_LENGTH)}  `));
+    expect(posted.summary).toHaveLength(SUMMARY_MAX_LENGTH);
+    expect(posted.summary).toBe('租'.repeat(SUMMARY_MAX_LENGTH));
+  });
+
+  it('摘要确实在哈希域内：手改落盘凭证的 summary → HASH_MISMATCH，breakAt 指向那一张', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openledger-summary-'));
+    try {
+      const journal = await createJournal(root);
+      for (const seq of [1, 2, 3]) {
+        await journal.append(
+          '2026-03',
+          post({
+            voucherId: `S-000${seq}`,
+            voucherDate: '2026-03-10',
+            voucherNo: makeVoucherNo(seq),
+            summary: `第 ${seq} 笔赊销`,
+            lines: saleLines('甲客户'),
+            source: 'MANUAL',
+          }),
+        );
+      }
+      expect((await (await createJournal(root)).verify()).ok).toBe(true);
+
+      // 只改摘要：金额、分录、日期一个字节都不动。
+      const shard = join(root, 'journal', '2026-03.jsonl');
+      const rows = (await readFile(shard, 'utf8')).split('\n').filter((row) => row.length > 0);
+      const victim = JSON.parse(rows[1] ?? '{}') as { summary: string };
+      victim.summary = '被悄悄改成借款了';
+      rows[1] = JSON.stringify(victim);
+      await writeFile(shard, `${rows.join('\n')}\n`, 'utf8');
+
+      const verdict = await (await createJournal(root)).verify();
+      expect(verdict.ok).toBe(false);
+      expect(verdict.reason).toBe('HASH_MISMATCH');
+      expect(verdict.breakAt).toBe('S-0002');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('辅助核算的对象级校验（T06 硬要求的原始动机）', () => {
   it('1122 借方不填 counterparty → 必须拒绝（BP2 的 a28 就是这条）', () => {
     const lines = [entryLine('1122', 'DEBIT', 500_000), entryLine('5001', 'CREDIT', 500_000)];
     expectPostError(() => assertAuxiliary(lines), 'AUX_REQUIRED');
-    expect(() => post({ voucherId: 'V8', voucherDate: '2026-03-10', voucherNo: '记-0008', lines, source: 'MANUAL' })).toThrowError(
-      /必须填客户/,
-    );
+    expect(() =>
+      post({ voucherId: 'V8', voucherDate: '2026-03-10', voucherNo: '记-0008', summary: '赊销', lines, source: 'MANUAL' }),
+    ).toThrowError(/必须填客户/);
   });
 
   it('2202 贷方不填 counterparty → 必须拒绝；填了就能过', () => {
@@ -181,6 +297,7 @@ describe('红冲：追加一张反向凭证，不改原凭证', () => {
     voucherId: 'V100',
     voucherDate: '2026-03-10',
     voucherNo: makeVoucherNo(100),
+    summary: '收到甲客户货款',
     lines: saleLines('甲客户'),
     source: 'IMPORT',
   });
@@ -217,6 +334,7 @@ describe('红冲：追加一张反向凭证，不改原凭证', () => {
           voucherId: 'V105',
           voucherDate: '2026-03-10',
           voucherNo: '记-0105',
+          summary: '赊销',
           lines: saleLines('甲客户'),
           source: 'MANUAL',
           reverses: 'V100',
@@ -229,12 +347,56 @@ describe('红冲：追加一张反向凭证，不改原凭证', () => {
     const reversal = reverse(original, { voucherId: 'V106', voucherNo: '记-0106', date: '2026-03-20', reason: '金额错' });
     expect(reversal.lines[0]?.counterparty).toBe('甲客户');
   });
+
+  it('摘要自动为「红冲 记-0100」：调用方无法传入别的值', () => {
+    const reversal = reverse(original, { voucherId: 'V107', voucherNo: '记-0107', date: '2026-03-20', reason: '客户退款' });
+    expect(reversal.summary).toBe(`红冲 ${original.voucherNo}`);
+
+    // 硬塞一个 summary 也进不来：reverse 自己生成，不看调用方
+    const forced = reverse(original, {
+      voucherId: 'V108',
+      voucherNo: '记-0108',
+      date: '2026-03-20',
+      reason: '客户退款',
+      summary: '我想自己写摘要',
+    } as ReverseOptions);
+    expect(forced.summary).toBe(`红冲 ${original.voucherNo}`);
+    // 摘要搬进 summary 后，ruleSnapshot 里不再有那个非正式键
+    expect(forced.ruleSnapshot['SUMMARY']).toBeUndefined();
+
+    // @ts-expect-error ReverseOptions 刻意没有 summary 字段：红冲摘要不接受自填（D004）
+    const injected: ReverseOptions = { voucherId: 'V109', voucherNo: '记-0109', date: '2026-03-20', reason: 'x', summary: '自填' };
+    expect(injected.voucherId).toBe('V109');
+  });
+
+  it('原凭证号过长时报「凭证号过长」，不许伪装成摘要超长（D004 §7.3）', () => {
+    try {
+      reverse({ ...original, voucherNo: `记-${'9'.repeat(40)}` }, { voucherId: 'V110', voucherNo: '记-0110', date: '2026-03-20', reason: '客户退款' });
+      expect.unreachable('超长凭证号必须拒绝');
+    } catch (error) {
+      expect(error).toBeInstanceOf(PostError);
+      expect((error as PostError).code).toBe('INVALID_VOUCHER_NO');
+      expect((error as PostError).message).toContain('凭证号过长');
+      expect((error as PostError).message).not.toContain('摘要最多');
+    }
+  });
+
+  it('原凭证号 37 字是边界：红冲摘要正好 40 字，仍可落账', () => {
+    const longNo = `记${'9'.repeat(36)}`;
+    const reversal = reverse({ ...original, voucherNo: longNo }, { voucherId: 'V111', voucherNo: '记-0111', date: '2026-03-20', reason: '边界' });
+    expect(longNo).toHaveLength(37);
+    expect(reversal.summary).toBe(`红冲 ${longNo}`);
+    expect(reversal.summary).toHaveLength(SUMMARY_MAX_LENGTH);
+  });
 });
 
 describe('makeManualVoucher', () => {
-  it('摘要必填、至少两条分录', () => {
+  it('摘要必填（空串与纯空白都拒），且至少两条分录', () => {
+    expect(() => makeManualVoucher({ voucherId: 'M1', voucherNo: '记-0001', date: '2026-03-10', summary: '', lines: [] })).toThrowError(
+      /摘要必填/,
+    );
     expect(() =>
-      makeManualVoucher({ voucherId: 'M1', voucherNo: '记-0001', date: '2026-03-10', summary: 'a', lines: [] }),
+      makeManualVoucher({ voucherId: 'M1', voucherNo: '记-0001', date: '2026-03-10', summary: '   ', lines: [] }),
     ).toThrowError(/摘要必填/);
     expect(() =>
       makeManualVoucher({
@@ -247,7 +409,7 @@ describe('makeManualVoucher', () => {
     ).toThrowError(PostError);
   });
 
-  it('摘要落进 ruleSnapshot.SUMMARY（PostedVoucher 没有 summary 字段）', () => {
+  it('摘要落在 summary 字段，ruleSnapshot 保持干净（不再有 SUMMARY 这个非正式键）', () => {
     const draft = makeManualVoucher({
       voucherId: 'M3',
       voucherNo: '记-0003',
@@ -258,7 +420,8 @@ describe('makeManualVoucher', () => {
         { accountCode: '1002', direction: 'CREDIT', amountCents: 800_000 },
       ],
     });
-    expect(draft.ruleSnapshot?.['SUMMARY']).toBe('支付办公室租金');
+    expect(draft.summary).toBe('支付办公室租金');
+    expect(draft.ruleSnapshot).toBeUndefined();
     expect(draft.lines[0]?.accountName).toBe('管理费用—房租物业水电');
     expect(() => post(draft)).not.toThrow();
   });

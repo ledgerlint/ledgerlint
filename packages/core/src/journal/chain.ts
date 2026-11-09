@@ -55,7 +55,9 @@ export class ChainFormatError extends Error {
  * 否则把整张凭证搬到链的另一处就能不留痕。
  */
 export const VOUCHER_FIELD_ORDER = [
-  'prevHash', 'voucherId', 'periodId', 'voucherNo', 'voucherDate', 'lines',
+  // `summary` 插在 `voucherDate` 之后、`lines` 之前（D004 指定的位置）：抬头信息（日期、摘要）
+  // 先于明细（分录）。**顺序即协议**——挪一个位置，全部历史 hash 立刻失效。
+  'prevHash', 'voucherId', 'periodId', 'voucherNo', 'voucherDate', 'summary', 'lines',
   'totalDebitCents', 'totalCreditCents', 'source', 'reverses', 'ruleSnapshot', 'hit',
 ] as const;
 

@@ -57,6 +57,10 @@ export type PostErrorCode =
   | 'NOT_LEAF'
   /** 往来科目缺对象。 */
   | 'AUX_REQUIRED'
+  /** 摘要缺失、纯空白或超长（D004）。 */
+  | 'INVALID_SUMMARY'
+  /** 凭证号过长（红冲摘要要放进 40 字里）。不许它伪装成摘要超长（D004 §7.3）。 */
+  | 'INVALID_VOUCHER_NO'
   /** 红冲凭证没指明冲哪张，或非红冲凭证却带了 `reverses`。 */
   | 'REVERSE_TARGET';
 
@@ -76,6 +80,8 @@ export interface VoucherDraft {
   readonly voucherId: string;
   /** 记账日期 `YYYY-MM-DD`，`periodId` 的唯一来源。 */
   readonly voucherDate: string;
+  /** 摘要，必填且非空（D004）。刻意不给默认值：默认值会让「没写摘要」看起来像「写了」。 */
+  readonly summary: string;
   readonly voucherNo: string;
   readonly lines: readonly JournalLine[];
   readonly source: PostedVoucher['source'];
@@ -139,10 +145,31 @@ export function assertAuxiliary(lines: readonly JournalLine[]): void {
   }
 }
 
+/** 摘要长度上限（字）。同 `RuleHit.oneLiner`：长了没人读，没人读等于没有解释。 */
+export const SUMMARY_MAX_LENGTH = 40;
+
+/** 摘要闸门（D004）：必填、非空白、≤40 字，空格不算填了（同 `counterparty`）；超限文案必须带「当前 N 字」与来源提示（§7.2）。
+ * @throws {PostError} code 为 `INVALID_SUMMARY` */
+export function assertSummary(summary: unknown): void {
+  const text = typeof summary === 'string' ? summary.trim() : '';
+  if (text.length === 0) {
+    throw new PostError('INVALID_SUMMARY', '摘要必填：三个月后你得靠它认出这笔账（空串和空格都不算填了）。');
+  }
+  if (text.length > SUMMARY_MAX_LENGTH) {
+    throw new PostError('INVALID_SUMMARY', `摘要最多 ${SUMMARY_MAX_LENGTH} 字（当前 ${text.length} 字）；若来自规则，请检查该规则的一句人话。`);
+  }
+}
+
+/** 校验并规范化（去首尾空白）：否则「同一句话 + 尾随空格」会算出第二个 hash。 */
+export function normalizeSummary(summary: unknown): string {
+  assertSummary(summary);
+  return (summary as string).trim();
+}
+
 /**
  * 草稿 → 待落账凭证体。
  *
- * 校验顺序刻意是「日期 → 金额 → 平衡 → 末级 → 对象」：报错要指向**最靠前**的那个错误，
+ * 校验顺序刻意是「日期 → 摘要 → 金额 → 平衡 → 末级 → 对象」：报错要指向**最靠前**的那个错误，
  * 否则用户改完平衡才发现日期填错，要来回两趟。
  *
  * 借贷不平**一律拒绝**，不做任何自动填平：自动填平会让「差 1 分」这种真实错案
@@ -152,6 +179,7 @@ export function post(draft: VoucherDraft): PostedDraft {
   if (!isValidDate(draft.voucherDate)) {
     throw new PostError('INVALID_DATE', `凭证日期必须是真实存在的 YYYY-MM-DD，收到「${draft.voucherDate}」。`);
   }
+  const summary = normalizeSummary(draft.summary);
   if (draft.lines.length < 2) {
     throw new PostError('INVALID_AMOUNT', '一张凭证至少要有两条分录（借与贷）。');
   }
@@ -186,6 +214,7 @@ export function post(draft: VoucherDraft): PostedDraft {
     periodId: periodOf(draft.voucherDate),
     voucherNo: draft.voucherNo,
     voucherDate: draft.voucherDate,
+    summary,
     lines: draft.lines,
     totalDebitCents: debitCents,
     totalCreditCents: creditCents,
@@ -218,6 +247,8 @@ export interface ReverseOptions {
  *
  * 不加 `assertAuxiliary` 以外的判断：原凭证已经过 post，方向和金额都是合法的，
  * 取反之后借贷合计互换，仍然平衡。
+ *
+ * 摘要是自动生成的「红冲 <原凭证号>」，不接受调用方自填（D004）：`ReverseOptions` 里没有 `summary` 字段。
  */
 export function reverse(original: ReverseSource, options: ReverseOptions): PostedDraft {
   if (!isValidDate(options.date)) {
@@ -229,6 +260,13 @@ export function reverse(original: ReverseSource, options: ReverseOptions): Poste
   if ((options.reason ?? '').trim().length === 0) {
     throw new PostError('REVERSE_TARGET', '红冲必须写明原因：三个月后没人记得为什么冲。');
   }
+  // 先校验凭证号再拼摘要（D004 §7.3）：进摘要的是**原凭证号**（新凭证号不进摘要），要拦的就是它。
+  const summaryPrefix = '红冲 ';
+  const noLimit = SUMMARY_MAX_LENGTH - summaryPrefix.length;
+  if (original.voucherNo.length > noLimit) {
+    const message = `凭证号过长：原凭证号最多 ${noLimit} 字，当前 ${original.voucherNo.length} 字（红冲摘要要放进 ${SUMMARY_MAX_LENGTH} 字）。`;
+    throw new PostError('INVALID_VOUCHER_NO', message);
+  }
 
   const lines: readonly JournalLine[] = original.lines.map((line) => ({
     ...line,
@@ -239,6 +277,7 @@ export function reverse(original: ReverseSource, options: ReverseOptions): Poste
     voucherId: options.voucherId,
     voucherDate: options.date,
     voucherNo: options.voucherNo,
+    summary: `${summaryPrefix}${original.voucherNo}`,
     lines,
     source: 'REVERSE',
     reverses: original.voucherId,
@@ -271,16 +310,13 @@ export interface ManualVoucherInput {
  * 三条硬约束一条都不放松：借贷必须平衡、科目必须末级、摘要必填。
  * 不做的事：不提供「改已记账凭证」—— 那条路只有红冲。
  *
- * `PostedVoucher` 没有 `summary` 字段（凭证的可解释性由 `hit.oneLiner` 与
- * `ruleSnapshot` 承担），所以摘要落进 `ruleSnapshot.SUMMARY`：
- * 手工凭证没有规则命中，不给摘要留一个落点，三个月后就没人知道这笔是什么。
+ * 摘要落在 `summary` 字段里（D004），不再塞进 `ruleSnapshot.SUMMARY`：那是配置快照，不是「我说了什么」。
  */
 export function makeManualVoucher(input: ManualVoucherInput): VoucherDraft {
   if (!isValidDate(input.date)) {
     throw new PostError('INVALID_DATE', '凭证日期格式不对，应为 YYYY-MM-DD。');
   }
-  const summary = (input.summary ?? '').trim();
-  if (summary.length < 2) throw new PostError('INVALID_AMOUNT', '摘要必填，至少 2 个字。三个月后你得靠它认出这笔账。');
+  const summary = normalizeSummary(input.summary);
 
   const lines: readonly JournalLine[] = input.lines.map((line) => {
     const found = account(line.accountCode); // 不存在直接抛
@@ -298,9 +334,9 @@ export function makeManualVoucher(input: ManualVoucherInput): VoucherDraft {
     voucherId: input.voucherId,
     voucherDate: input.date,
     voucherNo: input.voucherNo,
+    summary,
     lines,
     source: 'MANUAL',
-    ruleSnapshot: { SUMMARY: summary },
   };
   // 让 post 做全部账务校验（平衡、末级、对象），手工凭证不走第二套规则。
   post(draft);
