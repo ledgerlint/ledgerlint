@@ -149,3 +149,113 @@ export function periodIntegrityViolations(vouchers: readonly PostedVoucher[]): r
   }
   return violations;
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * 明细账
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** 明细账的一行。 */
+export interface LedgerRow {
+  readonly voucherId: string;
+  readonly voucherDate: string;
+  readonly voucherNo: string;
+  readonly summary: string;
+  readonly direction: 'DEBIT' | 'CREDIT';
+  readonly amountCents: Cents;
+  /** 记完这一行之后的余额（借正贷负，与科目余额表同一口径）。 */
+  readonly balanceCents: Cents;
+  /** 红冲凭证指回的原凭证；普通凭证为 `null`。 */
+  readonly reverses: string | null;
+}
+
+export interface AccountLedger {
+  readonly code: string;
+  /** 区间开始之前的余额。不传区间时为 0。 */
+  readonly openingCents: Cents;
+  readonly rows: readonly LedgerRow[];
+  readonly closingCents: Cents;
+  readonly debitTotalCents: Cents;
+  readonly creditTotalCents: Cents;
+}
+
+export interface LedgerRange {
+  readonly from?: string;
+  readonly to?: string;
+}
+
+const inRange = (date: string, range: LedgerRange): boolean =>
+  (range.from === undefined || date >= range.from) && (range.to === undefined || date <= range.to);
+
+/**
+ * 某个科目的明细账。
+ *
+ * 两个顺序上的注意：
+ *
+ * 1. **按「日期 + 凭证号」排，不按落账顺序**。明细账是给人查账的，
+ *    落账顺序（先记哪张后记哪张）在查账时没有意义，反而会让"11 月的账"
+ *    中间夹着一条 10 月补录的、余额一路跳。余额是按这个顺序滚动累加的，
+ *    换顺序会让每一行的余额都变——所以这里必须一次定死。
+ * 2. **期初 = 区间之前所有分录的净额**，不是"上月结转"。没有结账也能看明细账，
+ *    因为余额本来就是连续的，不需要结转来"归零"。
+ */
+export function accountLedger(
+  vouchers: readonly PostedVoucher[],
+  code: string,
+  range: LedgerRange = {},
+): AccountLedger {
+  const ordered = [...vouchers].sort((left, right) =>
+    left.voucherDate === right.voucherDate
+      ? left.voucherNo.localeCompare(right.voucherNo)
+      : left.voucherDate < right.voucherDate
+        ? -1
+        : 1,
+  );
+
+  // 期初单独算一遍：余额要**从期初起滚**，不能从 0 起滚——否则区间内第一行的余额
+  // 会漏掉区间之前的累计，而后面每一行的余额跟着一起错，且错得很像"正常"。
+  let opening = 0;
+  if (range.from !== undefined) {
+    for (const voucher of ordered) {
+      if (voucher.voucherDate >= range.from) break;
+      for (const line of voucher.lines) {
+        if (line.accountCode !== code) continue;
+        opening += line.direction === 'DEBIT' ? line.amountCents : -line.amountCents;
+      }
+    }
+  }
+
+  let running = opening;
+  let debitTotal = 0;
+  let creditTotal = 0;
+  const rows: LedgerRow[] = [];
+
+  for (const voucher of ordered) {
+    for (const line of voucher.lines) {
+      if (line.accountCode !== code) continue;
+      if (!inRange(voucher.voucherDate, range)) continue;
+      const delta = line.direction === 'DEBIT' ? line.amountCents : -line.amountCents;
+      running += delta;
+      if (line.direction === 'DEBIT') debitTotal += line.amountCents;
+      else creditTotal += line.amountCents;
+      rows.push({
+        voucherId: voucher.voucherId,
+        voucherDate: voucher.voucherDate,
+        voucherNo: voucher.voucherNo,
+        summary: voucher.summary,
+        direction: line.direction,
+        amountCents: line.amountCents,
+        balanceCents: running,
+        reverses: voucher.reverses ?? null,
+      });
+    }
+  }
+
+  return {
+    code,
+    openingCents: opening,
+    rows,
+    closingCents: running,
+    debitTotalCents: debitTotal,
+    creditTotalCents: creditTotal,
+  };
+}

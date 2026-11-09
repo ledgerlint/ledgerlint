@@ -217,6 +217,12 @@ export const PNL_LINES: readonly PnlLineDef[] = [
  */
 const zero = (value: Cents): Cents => (value === 0 ? 0 : value);
 
+/** 利润表的取数区间（含端点）。都不给 = 全部历史。 */
+export interface IncomeRange {
+  readonly from?: string;
+  readonly to?: string;
+}
+
 /**
  * 利润表。收入按贷方净额（取正），成本费用按借方净额。
  *
@@ -226,10 +232,22 @@ const zero = (value: Cents): Cents => (value === 0 ? 0 : value);
  *
  * 隔离是**结构性**的：营业外与所得税只出现在最后两步的加总里，
  * 营业利润的算式里根本不出现它们，所以"混进去"不是靠自觉，是写不出来。
+ *
+ * @param range 可选的日期区间（含端点）。不给 = 全部历史。
+ *   为什么要它：页面上写的是「本年累计」，而此前实现是"全部历史"——
+ *   跨年之后上年利润会被算进本年，数字看起来完全正常。
  */
-export function incomeStatement(vouchers: readonly PostedVoucher[]): IncomeStatement {
+export function incomeStatement(
+  vouchers: readonly PostedVoucher[],
+  range: IncomeRange = {},
+): IncomeStatement {
   // 排除结转凭证：它们把 5xxx 冲平，计进来会让当期利润归零（见 `sweepsPnl`）。
-  const real = vouchers.filter((voucher) => !sweepsPnl(voucher));
+  const real = vouchers.filter(
+    (voucher) =>
+      !sweepsPnl(voucher) &&
+      (range.from === undefined || voucher.voucherDate >= range.from) &&
+      (range.to === undefined || voucher.voucherDate <= range.to),
+  );
   return assembleIncomeStatement([...balances(real).values()]);
 }
 

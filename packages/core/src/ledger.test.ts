@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createJournal } from './journal/io';
 import type { JournalHandle } from './journal/io';
 import {
+  accountLedger,
   balances,
   creditByPrefix,
   moneyBalance,
@@ -208,5 +209,69 @@ describe('期间与日期取数', () => {
 
     const broken = [{ ...all[0]!, periodId: '2026-02' }];
     expect(periodIntegrityViolations(broken)).toEqual([{ voucherId: 'V1', periodId: '2026-02', expected: '2026-03' }]);
+  });
+});
+
+/**
+ * 明细账。
+ *
+ * 明细账是**查账**用的，所以两件事必须对：
+ * ① 顺序是「日期 + 凭证号」，不是落账顺序（余额是按这个顺序滚出来的）；
+ * ② 区间期初 = 区间之前所有分录的净额，不依赖"上月有没有结转"。
+ *    后者尤其重要：没结账也应该能查明细账，余额本来就是连续的。
+ */
+describe('明细账', () => {
+  // 刻意打乱顺序：明细账必须自己按「日期 + 凭证号」排，不能依赖数组顺序。
+  const raw = [
+    { voucherDate: '2026-11-20', voucherNo: '记-0003', amountCents: 30000 },
+    { voucherDate: '2026-11-03', voucherNo: '记-0001', amountCents: 10000 },
+    { voucherDate: '2026-11-05', voucherNo: '记-0002', amountCents: 20000 },
+  ];
+  const vouchers: PostedVoucher[] = raw.map((head, index) => ({
+    voucherId: `v${index}`,
+    periodId: '2026-11',
+    voucherNo: head.voucherNo,
+    voucherDate: head.voucherDate,
+    summary: `第 ${index + 1} 笔`,
+    lines: [
+      entryLine('1002', 'DEBIT', head.amountCents),
+      entryLine('5001', 'CREDIT', head.amountCents),
+    ],
+    totalDebitCents: head.amountCents,
+    totalCreditCents: head.amountCents,
+    source: 'MANUAL' as const,
+    ruleSnapshot: {},
+    prevHash: '0'.repeat(64),
+    hash: String(index).repeat(64),
+  }));
+
+  it('按日期排序，余额逐行滚动', () => {
+    const ledger = accountLedger(vouchers, '1002');
+    expect(ledger.rows.map((row) => row.voucherNo)).toEqual(['记-0001', '记-0002', '记-0003']);
+    expect(ledger.rows.map((row) => row.balanceCents)).toEqual([10000, 30000, 60000]);
+    expect(ledger.closingCents).toBe(60000);
+    expect(ledger.openingCents).toBe(0);
+  });
+
+  it('区间：期初是区间之前的净额，期末是区间内的累计', () => {
+    const ledger = accountLedger(vouchers, '1002', { from: '2026-11-04', to: '2026-11-20' });
+    // 11-03 那笔在区间之前，进期初
+    expect(ledger.openingCents).toBe(10000);
+    expect(ledger.rows.map((row) => row.voucherDate)).toEqual(['2026-11-05', '2026-11-20']);
+    expect(ledger.closingCents).toBe(60000);
+    expect(ledger.debitTotalCents).toBe(50000);
+  });
+
+  it('贷方科目余额为负（借正贷负，与科目余额表同口径）', () => {
+    const ledger = accountLedger(vouchers, '5001');
+    expect(ledger.closingCents).toBe(-60000);
+    expect(ledger.creditTotalCents).toBe(60000);
+    expect(ledger.debitTotalCents).toBe(0);
+  });
+
+  it('没有该科目的分录时返回空账，不抛错', () => {
+    const ledger = accountLedger(vouchers, '560202');
+    expect(ledger.rows).toEqual([]);
+    expect(ledger.closingCents).toBe(0);
   });
 });

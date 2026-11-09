@@ -17,7 +17,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
-import { ACCOUNTS, balanceSheet, balances, incomeStatement, isOpeningVoucher, leafAccounts, trialBalance, type PostedVoucher } from '@ledgerlint/core';
+import { ACCOUNTS, account, accountLedger, balanceSheet, balances, incomeStatement, isOpeningVoucher, leafAccounts, periodRange, trialBalance, type PostedVoucher } from '@ledgerlint/core';
 import {
   closePeriod,
   closedPeriods,
@@ -182,8 +182,23 @@ async function readVouchers(rootDir: string): Promise<{
   };
 }
 
-async function stateHandler(rootDir: string): Promise<string> {
+/** 利润表取数区间。`year` / `month` 都以**账本里最新的那张凭证**为基准，不是今天。 */
+type RangeKey = 'all' | 'year' | 'month';
+
+function boundsOfRange(key: RangeKey, vouchers: readonly PostedVoucher[]): { from?: string; to?: string } {
+  if (key === 'all' || vouchers.length === 0) return {};
+  const latest = vouchers.reduce((max, voucher) => (voucher.voucherDate > max ? voucher.voucherDate : max), '');
+  if (key === 'month') {
+    const { start, end } = periodRange(latest.slice(0, 7));
+    return { from: start, to: end };
+  }
+  const year = latest.slice(0, 4);
+  return { from: `${year}-01-01`, to: `${year}-12-31` };
+}
+
+async function stateHandler(rootDir: string, rangeKey: RangeKey): Promise<string> {
   const { vouchers, periods, periodCounts, verify, warnings } = await readVouchers(rootDir);
+  const bounds = boundsOfRange(rangeKey, vouchers);
   const drafts = await (await createDraftStore(rootDir)).readAll();
   const names = new Map(ACCOUNTS.map((item) => [item.code, item.name]));
   const rows = [...balances(vouchers).values()]
@@ -220,7 +235,9 @@ async function stateHandler(rootDir: string): Promise<string> {
     verify,
     warnings,
     trial: trialBalance(vouchers),
-    income: incomeStatement(vouchers),
+    income: incomeStatement(vouchers, bounds),
+    /** 本次利润表用的是哪个区间，界面要如实标出来（别写"本年"却算全部）。 */
+    incomeRange: { key: rangeKey, ...bounds },
     sheet: balanceSheet(vouchers),
     balances: rows,
     vouchers: recent,
@@ -286,7 +303,37 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
         return;
       }
       if (url.pathname === '/api/state') {
-        sendText(res, 200, await stateHandler(options.rootDir), 'application/json; charset=utf-8');
+        const raw = url.searchParams.get('range') ?? 'year';
+        const rangeKey: RangeKey = raw === 'all' || raw === 'month' ? raw : 'year';
+        sendText(res, 200, await stateHandler(options.rootDir, rangeKey), 'application/json; charset=utf-8');
+        return;
+      }
+      if (url.pathname === '/api/ledger') {
+        const code = url.searchParams.get('code') ?? '';
+        // 科目不存在会在这里抛（`account()`），走下面的兜底 500 不如直接给 400。
+        try {
+          account(code);
+          const { vouchers } = await readVouchers(options.rootDir);
+          const from = url.searchParams.get('from') ?? undefined;
+          const to = url.searchParams.get('to') ?? undefined;
+          const ledger = accountLedger(vouchers, code, {
+            ...(from === undefined || from === '' ? {} : { from }),
+            ...(to === undefined || to === '' ? {} : { to }),
+          });
+          sendText(
+            res,
+            200,
+            JSON.stringify({ ...ledger, name: account(code).name }),
+            'application/json; charset=utf-8',
+          );
+        } catch (error) {
+          sendText(
+            res,
+            400,
+            JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+            'application/json; charset=utf-8',
+          );
+        }
         return;
       }
       if (url.pathname === '/api/confirm') {

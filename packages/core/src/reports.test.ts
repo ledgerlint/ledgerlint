@@ -340,3 +340,41 @@ describe('两表勾稽：未结转损益 == 净利润', () => {
     expect(bs.unclosedPnl).toBe(inc.netProfit);
   });
 });
+
+/**
+ * 利润表的区间口径。
+ *
+ * 页面上写的是「本年累计」。此前实现是"全部历史"——跨年之后上年利润会被算进本年，
+ * 数字看起来完全正常，而它会让"今年赚了多少"这个唯一重要的判断直接错掉。
+ */
+describe('利润表：区间', () => {
+  const on = (date: string, cents: number): PostedVoucher => {
+    seq += 1;
+    const built = [entryLine('1002', 'DEBIT', cents), entryLine('5001', 'CREDIT', cents)];
+    return {
+      voucherId: `d${seq}`,
+      periodId: date.slice(0, 7),
+      voucherNo: `记-${String(seq).padStart(4, '0')}`,
+      voucherDate: date,
+      summary: '测试',
+      lines: built,
+      totalDebitCents: cents,
+      totalCreditCents: cents,
+      source: 'MANUAL' as const,
+      ruleSnapshot: {},
+      prevHash: '0'.repeat(64),
+      hash: 'y'.repeat(64),
+    };
+  };
+
+  it('本年累计不含上年', () => {
+    const vouchers = [on('2025-12-20', 100000), on('2026-01-10', 200000)];
+    expect(incomeStatement(vouchers).revenue).toBe(300000);
+    expect(incomeStatement(vouchers, { from: '2026-01-01', to: '2026-12-31' }).revenue).toBe(200000);
+  });
+
+  it('区间含端点', () => {
+    const vouchers = [on('2026-11-01', 10000), on('2026-11-30', 20000), on('2026-12-01', 40000)];
+    expect(incomeStatement(vouchers, { from: '2026-11-01', to: '2026-11-30' }).revenue).toBe(30000);
+  });
+});

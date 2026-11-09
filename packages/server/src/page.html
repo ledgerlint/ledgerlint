@@ -71,6 +71,9 @@
   tr.total td:first-child { border-top: 1px solid var(--line); }
   tr.total td:last-child { border-top: 1px solid var(--line); }
   tr.head td:first-child { padding-left: 12px; }
+  /* 可点的行：告诉人这一行能展开，而不是靠猜 */
+  tr.pick { cursor: pointer; }
+  tr.pick:hover td { background: #f7f8f7; }
   tr.grp td {
     padding: 16px 12px 5px; background: transparent; border-bottom: none;
     color: var(--faint); font-size: 11px; letter-spacing: .06em;
@@ -209,12 +212,23 @@
     <tr><th>日期</th><th>号</th><th>摘要</th><th>分录</th><th class="num">金额</th><th style="width:158px"></th></tr>
   </thead><tbody></tbody></table>
 
-  <h2>科目余额</h2>
+  <h2>科目余额 <span class="sub">点一行看明细账</span></h2>
   <table id="balances"><thead>
     <tr><th>科目</th><th class="num">借方</th><th class="num">贷方</th><th class="num">余额<span class="hint" style="display:block;font-weight:400">借正／贷负</span></th></tr>
   </thead><tbody></tbody></table>
 
-  <h2>利润表 <span class="sub">本年累计</span></h2>
+  <div id="ledgerBlock" hidden>
+    <h2 id="ledgerTitle">明细账</h2>
+    <table id="ledger"><thead>
+      <tr><th>日期</th><th>号</th><th>摘要</th><th class="num">借</th><th class="num">贷</th><th class="num">余额</th></tr>
+    </thead><tbody></tbody></table>
+  </div>
+
+  <h2>利润表 <span class="sub"><select id="incomeRange">
+      <option value="year">本年累计</option>
+      <option value="month">本月</option>
+      <option value="all">全部</option>
+    </select></span></h2>
   <table id="income"><tbody></tbody></table>
 
   <h2>资产负债表</h2>
@@ -228,6 +242,8 @@
 
 <script>
 const token = new URLSearchParams(location.search).get('token') || sessionStorage.getItem('ll-token') || '';
+/** 利润表区间。默认「本年」，与页面上写的字一致。 */
+let currentRange = 'year';
 if (token) sessionStorage.setItem('ll-token', token);
 
 const pick = (id) => document.getElementById(id);
@@ -600,12 +616,61 @@ function bindReverse(tbody) {
   };
 }
 
+/* ── 明细账 ──────────────────────────────────────────────────────── */
+async function showLedger(code, range) {
+  const params = new URLSearchParams({ code });
+  if (range && range.from) params.set('from', range.from);
+  if (range && range.to) params.set('to', range.to);
+  try {
+    const res = await fetch('/api/ledger?' + params.toString(), {
+      headers: { 'x-token': token },
+      cache: 'no-store',
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+
+    const span = range && range.from ? `${range.from} 至 ${range.to}` : '全部';
+    pick('ledgerBlock').hidden = false;
+    pick('ledgerTitle').innerHTML =
+      `明细账 · <code>${esc(data.code)}</code> ${esc(data.name)} <span class="sub">${esc(span)}</span>`;
+
+    const lines = [
+      `<tr class="grp"><td colspan="6">期初余额 ${yuan(data.openingCents)}</td></tr>`,
+      ...data.rows.map((row) => `<tr>
+        <td>${esc(row.voucherDate)}</td>
+        <td><code>${esc(row.voucherNo)}</code></td>
+        <td class="wrap">${esc(row.summary)}${row.reverses ? ' <span class="hint">红冲</span>' : ''}</td>
+        <td class="num">${row.direction === 'DEBIT' ? yuan(row.amountCents) : ''}</td>
+        <td class="num">${row.direction === 'CREDIT' ? yuan(row.amountCents) : ''}</td>
+        <td class="num">${yuan(row.balanceCents)}</td>
+      </tr>`),
+      `<tr class="total"><td colspan="3">本期合计 / 期末余额</td>
+        <td class="num">${yuan(data.debitTotalCents)}</td>
+        <td class="num">${yuan(data.creditTotalCents)}</td>
+        <td class="num">${yuan(data.closingCents)}</td></tr>`,
+    ];
+    pick('ledger').querySelector('tbody').innerHTML = lines.join('');
+    pick('ledgerBlock').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    fail(e.message);
+  }
+}
+
 async function load() {
-  const res = await fetch('/api/state', { headers: { 'x-token': token }, cache: 'no-store' });
+  const res = await fetch('/api/state?range=' + encodeURIComponent(currentRange), {
+    headers: { 'x-token': token },
+    cache: 'no-store',
+  });
   if (!res.ok) throw new Error(res.status === 401 ? '令牌无效：请用启动时打印的完整链接打开' : 'HTTP ' + res.status);
   const s = await res.json();
 
   pick('bookPath').textContent = s.rootDir;
+  // 区间下拉：改了就重新取数——利润表是服务端算的，前端不重复算一份。
+  pick('incomeRange').value = currentRange;
+  pick('incomeRange').onchange = () => {
+    currentRange = pick('incomeRange').value;
+    void load();
+  };
   buildManualForm(s);
   // 期初只在"还没建过"时出现；建完之后它就从页面上消失，因为再建一次会被内核拒绝。
   pick('openingBlock').hidden = s.hasOpening;
@@ -742,12 +807,17 @@ async function load() {
   bindReverse(tb);
 
   const bb = pick('balances').querySelector('tbody');
-  bb.innerHTML = s.balances.length ? s.balances.map((b) => `<tr>
+  bb.innerHTML = s.balances.length ? s.balances.map((b) => `<tr class="pick" data-code="${esc(b.code)}">
       <td><code>${esc(b.code)}</code> ${esc(b.name)}</td>
       <td class="num">${yuan(b.debitCents)}</td>
       <td class="num">${yuan(b.creditCents)}</td>
       <td class="num">${yuan(b.netDebitCents)}</td>
     </tr>`).join('') : '<tr><td colspan="4" class="empty">还没有余额</td></tr>';
+  bb.onclick = (ev) => {
+    const row = ev.target instanceof Element ? ev.target.closest('tr[data-code]') : null;
+    const code = row === null ? null : row.getAttribute('data-code');
+    if (code !== null) void showLedger(code, s.incomeRange);
+  };
 
   // ── 利润表 / 资产负债表 ───────────────────────────────────────────
   // 负数用红色而不是括号：括号是审计报表的惯例，但这是给创始人自己看的，
