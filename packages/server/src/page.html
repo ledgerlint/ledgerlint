@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>账本 lint</title>
+<style>
+  :root {
+    --ink: #1a1d21;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --bg: #fbfbfa;
+    --card: #ffffff;
+    --ok: #0f766e;
+    --warn: #b45309;
+    --bad: #b91c1c;
+    --accent: #1f2937;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  header {
+    padding: 18px 28px; border-bottom: 1px solid var(--line); background: var(--card);
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 16px; letter-spacing: .02em; }
+  header .path { color: var(--muted); font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+  main { padding: 24px 28px 60px; max-width: 1100px; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 22px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .card .label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .card .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .card.ok .value { color: var(--ok); }
+  .card.bad .value { color: var(--bad); }
+  .card.warn .value { color: var(--warn); }
+  h2 { font-size: 13px; text-transform: none; color: var(--muted); font-weight: 600; margin: 26px 0 10px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  th { background: #f6f7f6; color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: ui-monospace, Consolas, monospace; }
+  td.wrap { max-width: 420px; }
+  .lines { color: var(--muted); font-size: 12px; }
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; background: #eef2f1; color: var(--accent); }
+  .notice { border-left: 3px solid var(--warn); background: #fffbeb; padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 13px; }
+  .notice strong { color: var(--warn); }
+  .notice ul { margin: 6px 0 0; padding-left: 18px; }
+  .empty { color: var(--muted); padding: 20px; text-align: center; }
+  code { font-family: ui-monospace, Consolas, monospace; background: #f1f2f1; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 30px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>账本 lint</h1>
+  <span class="path" id="bookPath">…</span>
+</header>
+
+<main>
+  <div class="row" id="cards"></div>
+
+  <h2>凭证清单</h2>
+  <table id="vouchers"><thead>
+    <tr><th>日期</th><th>号</th><th>摘要</th><th>分录</th><th class="num">金额</th></tr>
+  </thead><tbody></tbody></table>
+
+  <h2>科目余额</h2>
+  <table id="balances"><thead>
+    <tr><th>科目</th><th class="num">借方</th><th class="num">贷方</th><th class="num">余额</th></tr>
+  </thead><tbody></tbody></table>
+
+  <h2>它查不出什么</h2>
+  <div class="notice">
+    <strong>本次机检的边界</strong>
+    <ul id="limits"></ul>
+  </div>
+
+  <footer id="foot"></footer>
+</main>
+
+<script>
+const token = new URLSearchParams(location.search).get('token') || sessionStorage.getItem('ll-token') || '';
+if (token) sessionStorage.setItem('ll-token', token);
+
+const pick = (id) => document.getElementById(id);
+const yuan = (cents) => (cents / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function card(label, value, sub, cls) {
+  return `<div class="card ${cls || ''}"><div class="label">${esc(label)}</div>
+    <div class="value">${esc(value)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>`;
+}
+
+async function load() {
+  const res = await fetch('/api/state', { headers: { 'x-token': token }, cache: 'no-store' });
+  if (!res.ok) throw new Error(res.status === 401 ? '令牌无效：请用启动时打印的完整链接打开' : 'HTTP ' + res.status);
+  const s = await res.json();
+
+  pick('bookPath').textContent = s.rootDir;
+  const v = s.verify || {};
+  const rejected = !v.ok;
+  pick('cards').innerHTML = [
+    card('凭证张数', String(s.voucherCount), s.periods.join('、') || '尚无凭证'),
+    card('链完整性', rejected ? '不通过' : '完整', rejected ? (v.reason || '') : '逐张重算哈希通过', rejected ? 'bad' : 'ok'),
+    card('试算平衡', s.trial.balanced ? '平衡' : '不平', `借 ${yuan(s.trial.debitCents)} / 贷 ${yuan(s.trial.creditCents)}`, s.trial.balanced ? 'ok' : 'bad'),
+    card('告警', String((v.warnings || []).length), '锚点 / 残片 / 坏行', (v.warnings || []).length ? 'warn' : ''),
+  ].join('');
+
+  const tb = pick('vouchers').querySelector('tbody');
+  tb.innerHTML = s.vouchers.length ? s.vouchers.map((x) => `<tr>
+      <td>${esc(x.voucherDate)}</td>
+      <td><code>${esc(x.voucherNo)}</code></td>
+      <td class="wrap">${esc(x.summary)}</td>
+      <td class="lines">${x.lines.map((l) => `${l.direction === 'DEBIT' ? '借' : '贷'} ${esc(l.accountName)} ${yuan(l.amountCents)}`).join('<br>')}</td>
+      <td class="num">${yuan(x.totalDebitCents)}</td>
+    </tr>`).join('') : '<tr><td colspan="5" class="empty">还没有凭证</td></tr>';
+
+  const bb = pick('balances').querySelector('tbody');
+  bb.innerHTML = s.balances.length ? s.balances.map((b) => `<tr>
+      <td><code>${esc(b.code)}</code> ${esc(b.name)}</td>
+      <td class="num">${yuan(b.debitCents)}</td>
+      <td class="num">${yuan(b.creditCents)}</td>
+      <td class="num">${yuan(b.netDebitCents)}</td>
+    </tr>`).join('') : '<tr><td colspan="4" class="empty">还没有余额</td></tr>';
+
+  pick('limits').innerHTML = (s.limitations || []).map((t) => `<li>${esc(t)}</li>`).join('');
+  pick('foot').textContent = `数据目录：${s.rootDir} · 仅本机可访问 · 关闭终端即停止`;
+}
+
+load().catch((e) => {
+  pick('cards').innerHTML = `<div class="card bad"><div class="label">加载失败</div><div class="value">无法读取账套</div><div class="sub">${esc(e.message)}</div></div>`;
+});
+</script>
+</body>
+</html>

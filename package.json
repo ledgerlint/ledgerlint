@@ -1,23 +1,34 @@
 {
-  "name": "openledger",
-  "version": "0.0.0",
-  "private": true,
+  "name": "ledgerlint",
+  "version": "0.0.1",
   "type": "module",
-  "description": "把一家小企业的银行流水与发票，变成一份带机检与局限说明的凭证草稿包（本地、纯文本、可审计）",
+  "description": "把银行流水和发票变成一份可复核、带机检与局限说明的凭证包（本地、纯文本、可审计）",
   "license": "AGPL-3.0-or-later",
   "engines": {
     "node": ">=20"
   },
+  "bin": {
+    "ledgerlint": "dist/ledgerlint.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
     "typecheck": "npm run typecheck -w @ledgerlint/core -w @ledgerlint/import -w @ledgerlint/server -w @ledgerlint/web -w @ledgerlint/cli",
     "test": "vitest run",
-    "lines": "node scripts/count-lines.mjs"
+    "lines": "node scripts/count-lines.mjs",
+    "build": "node scripts/build.mjs",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/ledgerlint.js ./mybook --demo"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7.3",
     "vitest": "^5.1.0"
   }
