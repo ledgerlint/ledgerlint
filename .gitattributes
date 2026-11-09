@@ -11,6 +11,10 @@
 *.woff2 binary
 *.tgz binary
 
+# GBK 编码的样例账单：按二进制处理。换行规范化会改动字节，
+# 而这些文件的测试价值就在于"原样"（上游 Apache-2.0，见同目录 NOTICE.md）。
+packages/import/fixtures/public/*-gbk.csv binary
+
 # 账本测试数据按文本处理（可 diff、可 review）
 *.jsonl text eol=lf
 *.yaml text eol=lf

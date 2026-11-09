@@ -27,3 +27,4 @@ tmp/
 
 # WorkBuddy 会话与工作日志（内部记录，不入公开仓库）
 .workbuddy/
+.corpus/
